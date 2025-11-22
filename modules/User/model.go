@@ -21,4 +21,13 @@ type User struct {
 	Name     string  `json:"name"`
 	Password string  `json:"password"`
 	Profile  Profile `json:"profile" gorm:"embedded;embeddedPrefix:profile_"`
+	Groups   []Group `json:"groups" gorm:"many2many:user_groups"`
+}
+type Group struct {
+	gorm.Model
+	UserID   uint   `json:"user_id"`
+	User     User   `json:"user" gorm:"foreignKey:UserID"`
+	Members  []User `json:"members" gorm:"many2many:user_groups"`
+	Name     string `json:"name"`
+	Capacity int    `json:"capacity"`
 }

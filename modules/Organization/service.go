@@ -24,5 +24,5 @@ func Register(c *fiber.Ctx, db *gorm.DB) error {
 		return c.Status(400).JSON(fiber.Map{"msg": "failed to add organization"})
 	}
 
-	return c.Status(201).JSON(fiber.Map{"msg": org.Type + ""})
+	return c.Status(201).JSON(fiber.Map{"msg": org.Type + " created successfully", "data": org})
 }

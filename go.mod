@@ -6,6 +6,8 @@ require (
 	github.com/gofiber/fiber/v2 v2.52.10
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/joho/godotenv v1.5.1
+	github.com/mailjet/mailjet-apiv3-go/v4 v4.0.8
+	golang.org/x/crypto v0.23.0
 	gorm.io/datatypes v1.2.7
 	gorm.io/driver/postgres v1.5.0
 	gorm.io/gorm v1.31.1
@@ -30,7 +32,6 @@ require (
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasthttp v1.51.0 // indirect
 	github.com/valyala/tcplisten v1.0.0 // indirect
-	golang.org/x/crypto v0.23.0 // indirect
 	golang.org/x/sync v0.9.0 // indirect
 	golang.org/x/sys v0.28.0 // indirect
 	golang.org/x/text v0.20.0 // indirect
