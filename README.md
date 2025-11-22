@@ -28,7 +28,7 @@ MAILJET_FROM=
 
 ## How to run the app
 
-ensure your have Go installed on your machine then run the following commands
+ensure your have Go installed on your machine then run the following command
 The first step is to ensure you get `air` setup on your machine for hot refresh
 <code>
 AIR
