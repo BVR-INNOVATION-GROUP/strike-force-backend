@@ -3,7 +3,7 @@ FROM golang:1.24.1-alpine AS builder
 
 WORKDIR /app
 
-# Copy go mod files
+# Copy go mod files first
 COPY go.mod go.sum ./
 
 # Download dependencies
@@ -12,8 +12,21 @@ RUN go mod download
 # Copy all source files
 COPY . .
 
+# Verify the build context
+RUN echo "=== Verifying build context ===" && \
+    ls -la && \
+    echo "=== Checking modules ===" && \
+    ls -la modules/ && \
+    echo "=== Checking Auth module ===" && \
+    ls -la modules/Auth/ && \
+    echo "=== Checking go.mod ===" && \
+    cat go.mod | head -5
+
+# Ensure module is properly set up
+RUN go mod tidy
+
 # Build the application
-RUN go build -ldflags="-w -s" -o out
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o out .
 
 # Runtime stage
 FROM alpine:latest

@@ -12,4 +12,6 @@ test.go
 seed
 railway.json
 nixpacks.toml
+Dockerfile
+.dockerignore
 
