@@ -9,11 +9,10 @@ COPY go.mod go.sum ./
 # Download dependencies
 RUN go mod download
 
-# Copy source files explicitly to ensure modules are included
+# Copy all source files (modules, config, main.go, etc.)
 COPY main.go ./
 COPY config/ ./config/
 COPY modules/ ./modules/
-COPY cmd/ ./cmd/ 2>/dev/null || true
 
 # Verify modules were copied correctly
 RUN echo "=== Verifying copied files ===" && \
