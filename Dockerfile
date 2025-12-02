@@ -9,8 +9,21 @@ COPY go.mod go.sum ./
 # Download dependencies
 RUN go mod download
 
-# Copy all source files
-COPY . .
+# Copy source files explicitly to ensure modules are included
+COPY main.go ./
+COPY config/ ./config/
+COPY modules/ ./modules/
+COPY cmd/ ./cmd/ 2>/dev/null || true
+
+# Verify modules were copied correctly
+RUN echo "=== Verifying copied files ===" && \
+    echo "main.go exists:" && test -f main.go && echo "✓" || echo "✗" && \
+    echo "config/ exists:" && test -d config && echo "✓" || echo "✗" && \
+    echo "modules/ exists:" && test -d modules && echo "✓" || echo "✗" && \
+    echo "=== Contents of modules/ ===" && \
+    ls -la modules/ && \
+    echo "=== Checking for Auth ===" && \
+    (test -d modules/Auth && echo "modules/Auth/ EXISTS" && ls -la modules/Auth/ || echo "modules/Auth/ MISSING - this is the problem!")
 
 # Debug: Show what was actually copied
 RUN echo "=== Build Context Contents ===" && \
@@ -23,22 +36,31 @@ RUN echo "=== Build Context Contents ===" && \
     echo "=== Looking for config ===" && \
     find . -name "config" -type d 2>/dev/null || echo "config directory not found"
 
-# Check if modules exists, if not, fail with clear error
-RUN if [ ! -d "modules" ]; then \
-        echo "ERROR: modules/ directory is missing from build context!" && \
-        echo "This usually means Railway is building from the wrong directory." && \
-        echo "Please check Railway Settings -> Root Directory" && \
+# Verify modules/Auth exists (critical check)
+RUN if [ ! -d "modules/Auth" ]; then \
+        echo "========================================" && \
+        echo "ERROR: modules/Auth/ is missing!" && \
+        echo "========================================" && \
+        echo "This means the modules subdirectories are not in the build context." && \
+        echo "" && \
+        echo "Possible causes:" && \
+        echo "1. Railway Root Directory is set incorrectly" && \
+        echo "2. modules/ directory is not committed to git" && \
+        echo "3. .dockerignore is excluding modules (check .dockerignore)" && \
+        echo "" && \
+        echo "Current modules/ contents:" && \
+        ls -la modules/ 2>/dev/null || echo "modules/ doesn't exist" && \
+        echo "" && \
+        echo "Please check:" && \
+        echo "- Railway Settings -> Root Directory (should be '.' or empty)" && \
+        echo "- Git repo has modules/ committed" && \
         exit 1; \
     fi && \
-    echo "=== modules/ directory found ===" && \
-    ls -la modules/ && \
-    echo "=== modules/Auth/ contents ===" && \
-    ls -la modules/Auth/ || echo "WARNING: modules/Auth/ not found"
+    echo "✓ modules/Auth/ found" && \
+    ls -la modules/Auth/
 
-# Ensure module is properly set up
-RUN go mod tidy
-
-# Build the application
+# Build the application (skip go mod tidy - it tries to fetch from git)
+# Local packages should be resolved automatically
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o out .
 
 # Runtime stage
