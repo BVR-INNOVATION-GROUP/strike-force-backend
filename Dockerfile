@@ -12,15 +12,28 @@ RUN go mod download
 # Copy all source files
 COPY . .
 
-# Verify the build context
-RUN echo "=== Verifying build context ===" && \
-    ls -la && \
-    echo "=== Checking modules ===" && \
+# Debug: Show what was actually copied
+RUN echo "=== Build Context Contents ===" && \
+    echo "Current directory:" && pwd && \
+    echo "Files in /app:" && ls -la && \
+    echo "=== Looking for modules ===" && \
+    find . -name "modules" -type d 2>/dev/null || echo "modules directory not found" && \
+    echo "=== Looking for main.go ===" && \
+    find . -name "main.go" 2>/dev/null || echo "main.go not found" && \
+    echo "=== Looking for config ===" && \
+    find . -name "config" -type d 2>/dev/null || echo "config directory not found"
+
+# Check if modules exists, if not, fail with clear error
+RUN if [ ! -d "modules" ]; then \
+        echo "ERROR: modules/ directory is missing from build context!" && \
+        echo "This usually means Railway is building from the wrong directory." && \
+        echo "Please check Railway Settings -> Root Directory" && \
+        exit 1; \
+    fi && \
+    echo "=== modules/ directory found ===" && \
     ls -la modules/ && \
-    echo "=== Checking Auth module ===" && \
-    ls -la modules/Auth/ && \
-    echo "=== Checking go.mod ===" && \
-    cat go.mod | head -5
+    echo "=== modules/Auth/ contents ===" && \
+    ls -la modules/Auth/ || echo "WARNING: modules/Auth/ not found"
 
 # Ensure module is properly set up
 RUN go mod tidy
