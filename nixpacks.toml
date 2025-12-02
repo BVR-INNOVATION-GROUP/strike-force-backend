@@ -1,0 +1,12 @@
+[phases.setup]
+nixPkgs = ["go_1_24"]
+
+[phases.install]
+cmds = ["go mod download"]
+
+[phases.build]
+cmds = ["go build -ldflags=\"-w -s\" -o out"]
+
+[start]
+cmd = "./out"
+

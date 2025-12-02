@@ -1,0 +1,15 @@
+.env
+.env.*
+tmp/
+uploads/
+migrations/
+bin/
+.git/
+.gitignore
+*.md
+docker-compose.yml
+test.go
+seed
+railway.json
+nixpacks.toml
+
