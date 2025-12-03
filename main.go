@@ -49,6 +49,9 @@ func main() {
 	}
 	log.Println("Database connected successfully")
 
+	// Check if users table is empty and seed if needed
+	checkAndSeed(DB)
+
 	// Serve static files (uploads)
 	app.Static("/uploads", "./uploads")
 
