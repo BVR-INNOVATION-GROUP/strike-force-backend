@@ -21,3 +21,5 @@ func RegisterRoutes(router fiber.Router, db *gorm.DB) {
 		return Delete(c, db)
 	})
 }
+
+

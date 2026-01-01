@@ -90,3 +90,5 @@ func SendDelegatedAccessEmail(email, name, password, organizationName, delegator
 	_, err := mj.SendMailV31(&messages)
 	return mailer.InterpretMailjetError(err, "delegated access email")
 }
+
+

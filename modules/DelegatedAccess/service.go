@@ -223,3 +223,5 @@ func Delete(c *fiber.Ctx, db *gorm.DB) error {
 
 	return c.JSON(fiber.Map{"msg": "delegated access withdrawn successfully"})
 }
+
+

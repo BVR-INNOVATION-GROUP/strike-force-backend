@@ -17,3 +17,5 @@ type DelegatedAccess struct {
 	Organization    organization.Organization `json:"organization" gorm:"foreignKey:OrganizationID"`
 	IsActive        bool                      `json:"isActive" gorm:"default:true"`
 }
+
+
