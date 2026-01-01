@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"log"
-	"strconv"
 
 	"github.com/BVR-INNOVATION-GROUP/strike-force-backend/config"
 	analytics "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Analytics"
@@ -80,10 +79,10 @@ func main() {
 	log.Println("All routes registered successfully")
 
 	// Get port from environment (Railway uses PORT, local dev uses APP_PORT)
-	port := strconv.Itoa(3000)
+	port := "3000"
 
 	fmt.Println("Server starting on port " + port)
-	if err := app.Listen(":" + port); err != nil {
+	if err := app.Listen("0.0.0.0:" + port); err != nil {
 		log.Fatal("Failed to start server: " + err.Error())
 	}
 
