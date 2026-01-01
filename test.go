@@ -39,7 +39,7 @@ package main
 // 				Email: "kigongovincent625@gmail.com",
 // 				Name:  "vincent",
 // 			},
-// 		}.,
+// 		},
 // 		Subject:  "Test Email raaaa",
 // 		TextPart: "Hello, this is a test email sent from Go using Mailjet.",
 // 	}
