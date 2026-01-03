@@ -335,22 +335,35 @@ func Login(c *fiber.Ctx, db *gorm.DB) error {
 }
 
 func SignUp(c *fiber.Ctx, db *gorm.DB) error {
+	// Use a separate struct for signup request since Password field has json:"-" in User model
+	type SignUpRequest struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+		Name     string `json:"name"`
+		Role     string `json:"role"`
+	}
 
-	var user User
+	var signupReq SignUpRequest
 
 	// Parse incoming JSON first
-	if err := c.BodyParser(&user); err != nil {
+	if err := c.BodyParser(&signupReq); err != nil {
 		return c.Status(401).JSON(fiber.Map{"msg": "invalid credentials"})
 	}
 
 	// Validate and hash the user-provided password
-	if user.Password == "" {
+	if signupReq.Password == "" {
 		return c.Status(400).JSON(fiber.Map{"msg": "password is required"})
 	}
-	hashed := GenerateHash(user.Password)
+	hashed := GenerateHash(signupReq.Password)
 	if hashed == "" {
 		return c.Status(500).JSON(fiber.Map{"msg": "failed to hash password"})
 	}
+
+	// Create User struct from signup request
+	var user User
+	user.Email = signupReq.Email
+	user.Name = signupReq.Name
+	user.Role = signupReq.Role
 	user.Password = hashed
 
 	if user.Email == "" {
