@@ -1,12 +1,12 @@
 services:
   database: 
     image: postgres 
-    container_name: strikeforce4
+    container_name: strikeforce6
 
     environment:
       - POSTGRES_USER=admin
       - POSTGRES_PASSWORD=Admin@2025
-      - POSTGRES_DB=strikeforce_db3
+      - POSTGRES_DB=strikeforce_db4
 
     ports:
       - "5432:5432"  

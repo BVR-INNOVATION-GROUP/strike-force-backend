@@ -322,11 +322,10 @@ func Login(c *fiber.Ctx, db *gorm.DB) error {
 func SignUp(c *fiber.Ctx, db *gorm.DB) error {
 
 	var user User
-	var tmpPassword = user.Password
 
 	// Parse incoming JSON first
 	if err := c.BodyParser(&user); err != nil {
-		return c.Status(401).JSON(fiber.Map{"msg": "invalid credentials"})
+		return c.Status(400).JSON(fiber.Map{"msg": "invalid credentials"})
 	}
 
 	// Hash the user-provided password
@@ -351,7 +350,7 @@ func SignUp(c *fiber.Ctx, db *gorm.DB) error {
 
 	var tmpUser User
 	if err := db.Where("email = ?", user.Email).First(&tmpUser).Error; err == nil {
-		return c.Status(402).JSON(fiber.Map{"msg": "user with email " + user.Email + " already exists"})
+		return c.Status(409).JSON(fiber.Map{"msg": "user with email " + user.Email + " already exists"})
 	}
 
 	// Save to DB
@@ -359,9 +358,9 @@ func SignUp(c *fiber.Ctx, db *gorm.DB) error {
 		return c.Status(400).JSON(fiber.Map{"msg": "Invalid credentials submitted"})
 	}
 
-	// return c.Status(201).JSON(fiber.Map{"msg": "account created successfully"})
-	user.Password = tmpPassword
-	return Login(c, db)
+	// Return 201 status with success message - do not log in the user
+	// The client will handle showing success/error based on the status code
+	return c.Status(201).JSON(fiber.Map{"msg": "account created successfully"})
 
 }
 
