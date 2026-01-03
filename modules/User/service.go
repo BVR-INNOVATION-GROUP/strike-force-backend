@@ -17,12 +17,27 @@ import (
 var SECRET_KEY = []byte(os.Getenv("SECRET_KEY"))
 
 func GenerateHash(password string) string {
+	// Trim whitespace to avoid issues with leading/trailing spaces
+	password = strings.TrimSpace(password)
+	if password == "" {
+		return ""
+	}
 	passwordBytes := []byte(password)
-	passwordHash, _ := bcrypt.GenerateFromPassword(passwordBytes, bcrypt.DefaultCost)
+	passwordHash, err := bcrypt.GenerateFromPassword(passwordBytes, bcrypt.DefaultCost)
+	if err != nil {
+		// Log error but return empty string - caller should handle this
+		fmt.Printf("Error hashing password: %v\n", err)
+		return ""
+	}
 	return string(passwordHash)
 }
 
 func IsPasswordValid(hashedPassword, password string) bool {
+	// Trim whitespace from password to avoid comparison issues
+	password = strings.TrimSpace(password)
+	if hashedPassword == "" || password == "" {
+		return false
+	}
 	err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
 	return err == nil // Return true when password is valid (err is nil)
 }
@@ -328,8 +343,14 @@ func SignUp(c *fiber.Ctx, db *gorm.DB) error {
 		return c.Status(401).JSON(fiber.Map{"msg": "invalid credentials"})
 	}
 
-	// Hash the user-provided password
+	// Validate and hash the user-provided password
+	if user.Password == "" {
+		return c.Status(400).JSON(fiber.Map{"msg": "password is required"})
+	}
 	hashed := GenerateHash(user.Password)
+	if hashed == "" {
+		return c.Status(500).JSON(fiber.Map{"msg": "failed to hash password"})
+	}
 	user.Password = hashed
 
 	if user.Email == "" {
