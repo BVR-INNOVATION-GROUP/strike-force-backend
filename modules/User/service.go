@@ -1120,8 +1120,69 @@ func UpdateCurrentUser(c *fiber.Ctx, db *gorm.DB) error {
 		return c.Status(400).JSON(fiber.Map{"msg": "failed to update user: " + err.Error()})
 	}
 
-	// Reload with relations
-	db.Preload("Groups").First(&usr, usr.ID)
+	// Reload with relations - use same logic as GetCurrentUser to ensure all fields are populated
+	if err := db.First(&usr, usr.ID).Error; err != nil {
+		return c.Status(400).JSON(fiber.Map{"msg": "failed to reload user: " + err.Error()})
+	}
+	
+	// Load Groups separately to avoid issues with the relationship
+	usr.Groups = []Group{}
+	if err := db.Table("user_groups").
+		Select("groups.*").
+		Joins("JOIN groups ON user_groups.group_id = groups.id").
+		Where("user_groups.user_id = ?", usr.ID).
+		Scan(&usr.Groups).Error; err != nil {
+		// If Groups query fails, just leave as empty array - don't fail the entire request
+		usr.Groups = []Group{}
+	}
+
+	// Load student record if user is a student to get courseId
+	if usr.Role == "student" {
+		var courseID uint
+		if err := db.Table("students").Where("user_id = ?", usr.ID).Select("course_id").Scan(&courseID).Error; err == nil && courseID > 0 {
+			usr.CourseID = courseID
+		}
+	}
+
+	// Load OrgID for users that need it (same logic as GetCurrentUser)
+	if requiresOrganization(usr.Role) {
+		// For partners and university-admins, find org by user_id
+		org, err := findOrganizationByUserID(db, usr.ID)
+		if err == nil {
+			orgID := org.ID
+			usr.OrgID = &orgID
+		}
+	} else if usr.Role == "student" && usr.CourseID > 0 {
+		// For students, find org through course -> department -> organization
+		var orgID uint
+		if err := db.Table("courses").
+			Joins("JOIN departments ON courses.department_id = departments.id").
+			Where("courses.id = ?", usr.CourseID).
+			Select("departments.organization_id").
+			Scan(&orgID).Error; err == nil && orgID > 0 {
+			usr.OrgID = &orgID
+		}
+	} else if usr.Role == "supervisor" {
+		// For supervisors, find org through supervisor -> department -> organization
+		var orgID uint
+		if err := db.Table("supervisors").
+			Joins("JOIN departments ON supervisors.department_id = departments.id").
+			Where("supervisors.user_id = ?", usr.ID).
+			Select("departments.organization_id").
+			Scan(&orgID).Error; err == nil && orgID > 0 {
+			usr.OrgID = &orgID
+		}
+	} else if usr.Role == "delegated-admin" {
+		// For delegated admins, find org through delegated_access table
+		var orgID uint
+		if err := db.Table("delegated_accesses").
+			Where("delegated_user_id = ? AND is_active = ?", usr.ID, true).
+			Select("organization_id").
+			Scan(&orgID).Error; err == nil && orgID > 0 {
+			usr.OrgID = &orgID
+		}
+	}
+
 	// Password is excluded from JSON via json:"-" tag in User model
 
 	return c.JSON(fiber.Map{
