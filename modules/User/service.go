@@ -358,25 +358,9 @@ func SignUp(c *fiber.Ctx, db *gorm.DB) error {
 		return c.Status(400).JSON(fiber.Map{"msg": "Invalid credentials submitted"})
 	}
 
-	// Generate token for the newly created user
-	token, tokenErr := GenerateToken(user)
-	if tokenErr != nil {
-		return c.Status(500).JSON(fiber.Map{"msg": "failed to generate session token"})
-	}
-
-	// Reload user to get all relations (Profile, etc.)
-	if err := db.Preload("Profile").First(&user, user.ID).Error; err != nil {
-		return c.Status(500).JSON(fiber.Map{"msg": "failed to load user data"})
-	}
-
-	// Return token and user data (similar to Login response)
-	// This allows the frontend to immediately use the token to create the organization
-	var data = map[string]any{
-		"token": token,
-		"user":  user,
-	}
-
-	return c.Status(201).JSON(fiber.Map{"msg": "account created successfully", "data": data})
+	// Return 201 status with success message - do not log in the user
+	// The client will handle showing success/error based on the status code
+	return c.Status(201).JSON(fiber.Map{"msg": "account created successfully"})
 
 }
 

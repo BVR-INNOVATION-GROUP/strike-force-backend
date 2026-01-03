@@ -87,6 +87,97 @@ type organizationCreateRequest struct {
 	BillingProfile map[string]interface{} `json:"billingProfile"`
 }
 
+// organizationSignupRequest represents the request payload for organization signup (unauthenticated)
+type organizationSignupRequest struct {
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Address     string `json:"address"`
+	Website     string `json:"website"`
+	BrandColor  string `json:"brandColor"`
+	Email       string `json:"email"`
+	Password    string `json:"password"`
+	ContactName string `json:"contactName"`
+	Phone       string `json:"phone"`
+}
+
+// RegisterSignup handles organization signup without authentication
+func RegisterSignup(c *fiber.Ctx, db *gorm.DB) error {
+	var req organizationSignupRequest
+
+	// Parse the request body
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"msg": "something is wrong with the submitted data : " + err.Error()})
+	}
+
+	// Validate required fields
+	if req.Email == "" {
+		return c.Status(400).JSON(fiber.Map{"msg": "email is required"})
+	}
+	if req.Password == "" {
+		return c.Status(400).JSON(fiber.Map{"msg": "password is required"})
+	}
+	if req.Name == "" {
+		return c.Status(400).JSON(fiber.Map{"msg": "organization name is required"})
+	}
+	if req.Type == "" {
+		return c.Status(400).JSON(fiber.Map{"msg": "organization type is required"})
+	}
+	if req.ContactName == "" {
+		return c.Status(400).JSON(fiber.Map{"msg": "contact name is required"})
+	}
+
+	// Check if user already exists
+	var existingUser user.User
+	if err := db.Where("email = ?", req.Email).First(&existingUser).Error; err == nil {
+		return c.Status(409).JSON(fiber.Map{"msg": "user with email " + req.Email + " already exists"})
+	}
+
+	// Determine role based on organization type
+	userRole := "partner"
+	if strings.ToLower(req.Type) == "university" {
+		userRole = "university-admin"
+	}
+
+	// Create user account
+	newUser := user.User{
+		Email:    strings.TrimSpace(req.Email),
+		Name:     strings.TrimSpace(req.ContactName),
+		Role:     userRole,
+		Password: user.GenerateHash(req.Password),
+	}
+	if req.Phone != "" {
+		newUser.Profile.Phone = strings.TrimSpace(req.Phone)
+	}
+
+	if err := db.Create(&newUser).Error; err != nil {
+		return c.Status(400).JSON(fiber.Map{"msg": "failed to create user account: " + err.Error()})
+	}
+
+	// Create organization
+	var org Organization
+	org.Name = strings.TrimSpace(req.Name)
+	org.Type = strings.ToLower(strings.TrimSpace(req.Type))
+	org.Address = strings.TrimSpace(req.Address)
+	org.Website = strings.TrimSpace(req.Website)
+	org.BrandColor = strings.TrimSpace(req.BrandColor)
+	org.UserID = newUser.ID
+	org.IsApproved = false // Requires super-admin approval
+
+	if err := db.Create(&org).Error; err != nil {
+		// Rollback: delete user if organization creation fails
+		db.Delete(&newUser)
+		return c.Status(400).JSON(fiber.Map{"msg": "failed to create organization: " + err.Error()})
+	}
+
+	// Reload organization with user relation
+	db.Preload("User").First(&org, org.ID)
+
+	return c.Status(201).JSON(fiber.Map{
+		"msg":  org.Type + " created successfully",
+		"data": transformOrganizationForResponse(org),
+	})
+}
+
 func Register(c *fiber.Ctx, db *gorm.DB) error {
 	role, _ := c.Locals("role").(string)
 	isSuperAdmin := role == "super-admin"
