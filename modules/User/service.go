@@ -322,12 +322,14 @@ func Login(c *fiber.Ctx, db *gorm.DB) error {
 func SignUp(c *fiber.Ctx, db *gorm.DB) error {
 
 	var user User
-	var tmpPassword = user.Password
 
 	// Parse incoming JSON first
 	if err := c.BodyParser(&user); err != nil {
 		return c.Status(401).JSON(fiber.Map{"msg": "invalid credentials"})
 	}
+
+	// Save the plain text password before hashing (needed for login after signup)
+	tmpPassword := user.Password
 
 	// Hash the user-provided password
 	hashed := GenerateHash(user.Password)
