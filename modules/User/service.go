@@ -1166,3 +1166,37 @@ func UpdateUserSettings(c *fiber.Ctx, db *gorm.DB) error {
 		"data": settings,
 	})
 }
+
+// CreateAdminIfNotExists creates a default admin user if it doesn't exist
+func CreateAdminIfNotExists(db *gorm.DB) error {
+	adminEmail := "admin@bvrdesign.africa"
+	adminPassword := "1234567890"
+
+	// Check if admin user already exists
+	var existingUser User
+	err := db.Where("email = ?", adminEmail).First(&existingUser).Error
+
+	if err == nil {
+		// Admin user already exists
+		return nil
+	}
+
+	if err != gorm.ErrRecordNotFound {
+		// Some other error occurred
+		return fmt.Errorf("error checking for admin user: %w", err)
+	}
+
+	// Create admin user
+	adminUser := User{
+		Email:    adminEmail,
+		Name:     "Admin",
+		Role:     "super-admin",
+		Password: GenerateHash(adminPassword),
+	}
+
+	if err := db.Create(&adminUser).Error; err != nil {
+		return fmt.Errorf("error creating admin user: %w", err)
+	}
+
+	return nil
+}
