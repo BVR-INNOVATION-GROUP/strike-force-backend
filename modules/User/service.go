@@ -327,6 +327,7 @@ func SignUp(c *fiber.Ctx, db *gorm.DB) error {
 	if err := c.BodyParser(&user); err != nil {
 		return c.Status(401).JSON(fiber.Map{"msg": "invalid credentials"})
 	}
+	var tmpPassword = user.Password
 
 	// Hash the user-provided password
 	hashed := GenerateHash(user.Password)
@@ -358,139 +359,9 @@ func SignUp(c *fiber.Ctx, db *gorm.DB) error {
 		return c.Status(400).JSON(fiber.Map{"msg": "Invalid credentials submitted"})
 	}
 
-	// Reload user from DB to get the full record with ID
-	var foundUser User
-	if err := db.Where("email = ?", user.Email).First(&foundUser).Error; err != nil {
-		return c.Status(500).JSON(fiber.Map{"msg": "failed to retrieve created user"})
-	}
-
-	// Load student record if user is a student to get courseId
-	if foundUser.Role == "student" {
-		var courseID uint
-		if err := db.Table("students").Where("user_id = ?", foundUser.ID).Select("course_id").Scan(&courseID).Error; err == nil && courseID > 0 {
-			foundUser.CourseID = courseID
-		}
-	}
-
-	var organizationPayload fiber.Map
-	needsOrganizationSetup := false
-
-	if requiresOrganization(foundUser.Role) {
-		// For partners and university-admins, find org by user_id
-		org, err := findOrganizationByUserID(db, foundUser.ID)
-		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				// Organization doesn't exist - delete the user for cleanup
-				if deleteErr := db.Delete(&foundUser).Error; deleteErr != nil {
-					fmt.Printf("Warning: failed to delete orphaned user %d: %v\n", foundUser.ID, deleteErr)
-				}
-				return c.Status(401).JSON(fiber.Map{"msg": "user account has been removed"})
-			} else {
-				return c.Status(500).JSON(fiber.Map{"msg": "failed to load organization"})
-			}
-		} else {
-			organizationPayload = buildOrganizationResponse(org, foundUser.Email)
-
-			orgID := org.ID
-			foundUser.OrgID = &orgID
-
-			if !org.IsApproved {
-				return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-					"msg":   "organization pending approval",
-					"error": "ORGANIZATION_PENDING_APPROVAL",
-					"data": fiber.Map{
-						"organization": organizationPayload,
-					},
-				})
-			}
-		}
-	} else if foundUser.Role == "student" && foundUser.CourseID > 0 {
-		// For students, find org through course -> department -> organization
-		var orgID uint
-		if err := db.Table("courses").
-			Joins("JOIN departments ON courses.department_id = departments.id").
-			Where("courses.id = ?", foundUser.CourseID).
-			Select("departments.organization_id").
-			Scan(&orgID).Error; err == nil && orgID > 0 {
-			var org OrganizationRow
-			if err := db.Table("organizations").Where("id = ?", orgID).First(&org).Error; err == nil {
-				organizationPayload = buildOrganizationResponse(&org, foundUser.Email)
-				foundUser.OrgID = &orgID
-			}
-		}
-	} else if foundUser.Role == "supervisor" {
-		// For supervisors, find org through supervisor -> department -> organization
-		var orgID uint
-		if err := db.Table("supervisors").
-			Joins("JOIN departments ON supervisors.department_id = departments.id").
-			Where("supervisors.user_id = ?", foundUser.ID).
-			Select("departments.organization_id").
-			Scan(&orgID).Error; err == nil && orgID > 0 {
-			var org OrganizationRow
-			if err := db.Table("organizations").Where("id = ?", orgID).First(&org).Error; err == nil {
-				organizationPayload = buildOrganizationResponse(&org, foundUser.Email)
-				foundUser.OrgID = &orgID
-			}
-		}
-	} else if foundUser.Role == "delegated-admin" {
-		// For delegated admins, find org through delegated_access table
-		var orgID uint
-		if err := db.Table("delegated_accesses").
-			Where("delegated_user_id = ? AND is_active = ?", foundUser.ID, true).
-			Select("organization_id").
-			Scan(&orgID).Error; err == nil && orgID > 0 {
-			var org OrganizationRow
-			if err := db.Table("organizations").Where("id = ?", orgID).First(&org).Error; err == nil {
-				organizationPayload = buildOrganizationResponse(&org, foundUser.Email)
-				foundUser.OrgID = &orgID
-
-				if !org.IsApproved {
-					return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-						"msg":   "organization pending approval",
-						"error": "ORGANIZATION_PENDING_APPROVAL",
-						"data": fiber.Map{
-							"organization": organizationPayload,
-						},
-					})
-				}
-			} else {
-				// Organization not found - delete the user for cleanup
-				if deleteErr := db.Delete(&foundUser).Error; deleteErr != nil {
-					fmt.Printf("Warning: failed to delete orphaned delegated user %d: %v\n", foundUser.ID, deleteErr)
-				}
-				return c.Status(401).JSON(fiber.Map{"msg": "user account has been removed"})
-			}
-		} else {
-			// No active delegation found - delete the user for cleanup
-			if deleteErr := db.Delete(&foundUser).Error; deleteErr != nil {
-				fmt.Printf("Warning: failed to delete orphaned delegated user %d: %v\n", foundUser.ID, deleteErr)
-			}
-			return c.Status(401).JSON(fiber.Map{"msg": "user account has been removed"})
-		}
-	}
-
-	token, tokenErr := GenerateToken(foundUser)
-
-	if tokenErr != nil {
-		return c.Status(400).JSON(fiber.Map{"msg": "failed to verify session"})
-	}
-
-	// Password is excluded from JSON via json:"-" tag in User model
-
-	var data = map[string]any{
-		"token": token,
-		"user":  foundUser,
-	}
-
-	if organizationPayload != nil {
-		data["organization"] = organizationPayload
-	}
-
-	if needsOrganizationSetup {
-		data["needsOrganizationSetup"] = true
-	}
-
-	return c.JSON(fiber.Map{"msg": "account created successfully", "data": data})
+	// return c.Status(201).JSON(fiber.Map{"msg": "account created successfully"})
+	user.Password = tmpPassword
+	return Login(c, db)
 
 }
 
