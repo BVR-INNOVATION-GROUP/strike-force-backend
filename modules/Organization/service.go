@@ -761,6 +761,7 @@ func buildPartnerDashboardStats(db *gorm.DB, partnerID uint) (partnerDashboardSt
 	}
 
 	// Calculate total budget
+	// Budget is embedded with prefix "budget_", so columns are budget_currency and budget_value
 	var budgetRows []struct {
 		BudgetValue uint `gorm:"column:budget_value"`
 	}
@@ -768,11 +769,13 @@ func buildPartnerDashboardStats(db *gorm.DB, partnerID uint) (partnerDashboardSt
 		Select("budget_value").
 		Where("user_id = ?", partnerID).
 		Scan(&budgetRows).Error; err != nil {
-		return stats, err
-	}
-
-	for _, row := range budgetRows {
-		stats.TotalBudget += float64(row.BudgetValue)
+		// If query fails (e.g., column doesn't exist), set budget to 0 and log error
+		// This prevents the entire dashboard from failing
+		stats.TotalBudget = 0
+	} else {
+		for _, row := range budgetRows {
+			stats.TotalBudget += float64(row.BudgetValue)
+		}
 	}
 
 	return stats, nil

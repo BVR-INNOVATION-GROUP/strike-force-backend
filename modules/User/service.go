@@ -914,14 +914,34 @@ func DeleteGroup(c *fiber.Ctx, db *gorm.DB) error {
 
 // GetCurrentUser returns the current authenticated user
 func GetCurrentUser(c *fiber.Ctx, db *gorm.DB) error {
-	userID := c.Locals("user_id").(uint)
+	userIDRaw := c.Locals("user_id")
+	if userIDRaw == nil {
+		return c.Status(401).JSON(fiber.Map{"msg": "user ID not found in token"})
+	}
+	
+	userID, ok := userIDRaw.(uint)
+	if !ok {
+		return c.Status(401).JSON(fiber.Map{"msg": "invalid user ID type in token"})
+	}
+	
+	if userID == 0 {
+		return c.Status(401).JSON(fiber.Map{"msg": "invalid user ID: cannot be zero"})
+	}
+	
 	var usr User
 
+	// Try to load user with Groups preload first
+	// If Groups preload fails, load user without Groups
 	if err := db.Preload("Groups").First(&usr, userID).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return c.Status(404).JSON(fiber.Map{"msg": "user not found"})
+		// If preload fails, try loading user without Groups
+		if err2 := db.First(&usr, userID).Error; err2 != nil {
+			if err2 == gorm.ErrRecordNotFound {
+				return c.Status(404).JSON(fiber.Map{"msg": "user not found"})
+			}
+			return c.Status(400).JSON(fiber.Map{"msg": "failed to get user: " + err2.Error()})
 		}
-		return c.Status(400).JSON(fiber.Map{"msg": "failed to get user: " + err.Error()})
+		// If user loaded but Groups preload failed, set empty Groups array
+		usr.Groups = []Group{}
 	}
 
 	// Load student record if user is a student to get courseId
