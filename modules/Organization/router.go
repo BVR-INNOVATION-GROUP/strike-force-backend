@@ -8,11 +8,6 @@ import (
 
 func RegisterRoutes(router fiber.Router, db *gorm.DB) {
 
-	// Unauthenticated route for organization signup
-	router.Post("/org/signup", func(c *fiber.Ctx) error {
-		return RegisterSignup(c, db)
-	})
-
 	org := router.Group("/org", user.JWTProtect([]string{"partner", "university-admin", "super-admin"}))
 
 	org.Post("/", func(c *fiber.Ctx) error {

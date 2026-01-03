@@ -51,13 +51,6 @@ func main() {
 	}
 	log.Println("Database connected successfully")
 
-	// Create admin user if it doesn't exist
-	if err := user.CreateAdminIfNotExists(DB); err != nil {
-		log.Printf("Warning: Failed to create admin user: %v", err)
-	} else {
-		log.Println("Admin user check completed")
-	}
-
 	// Serve static files (uploads)
 	app.Static("/uploads", "./uploads")
 

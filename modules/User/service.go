@@ -322,10 +322,11 @@ func Login(c *fiber.Ctx, db *gorm.DB) error {
 func SignUp(c *fiber.Ctx, db *gorm.DB) error {
 
 	var user User
+	var tmpPassword = user.Password
 
 	// Parse incoming JSON first
 	if err := c.BodyParser(&user); err != nil {
-		return c.Status(400).JSON(fiber.Map{"msg": "invalid credentials"})
+		return c.Status(401).JSON(fiber.Map{"msg": "invalid credentials"})
 	}
 
 	// Hash the user-provided password
@@ -350,7 +351,7 @@ func SignUp(c *fiber.Ctx, db *gorm.DB) error {
 
 	var tmpUser User
 	if err := db.Where("email = ?", user.Email).First(&tmpUser).Error; err == nil {
-		return c.Status(409).JSON(fiber.Map{"msg": "user with email " + user.Email + " already exists"})
+		return c.Status(402).JSON(fiber.Map{"msg": "user with email " + user.Email + " already exists"})
 	}
 
 	// Save to DB
@@ -358,9 +359,9 @@ func SignUp(c *fiber.Ctx, db *gorm.DB) error {
 		return c.Status(400).JSON(fiber.Map{"msg": "Invalid credentials submitted"})
 	}
 
-	// Return 201 status with success message - do not log in the user
-	// The client will handle showing success/error based on the status code
-	return c.Status(201).JSON(fiber.Map{"msg": "account created successfully"})
+	// return c.Status(201).JSON(fiber.Map{"msg": "account created successfully"})
+	user.Password = tmpPassword
+	return Login(c, db)
 
 }
 
@@ -1164,38 +1165,4 @@ func UpdateUserSettings(c *fiber.Ctx, db *gorm.DB) error {
 		"msg":  "settings updated successfully",
 		"data": settings,
 	})
-}
-
-// CreateAdminIfNotExists creates a default admin user if it doesn't exist
-func CreateAdminIfNotExists(db *gorm.DB) error {
-	adminEmail := "admin@bvrdesign.africa"
-	adminPassword := "1234567890"
-
-	// Check if admin user already exists
-	var existingUser User
-	err := db.Where("email = ?", adminEmail).First(&existingUser).Error
-
-	if err == nil {
-		// Admin user already exists
-		return nil
-	}
-
-	if err != gorm.ErrRecordNotFound {
-		// Some other error occurred
-		return fmt.Errorf("error checking for admin user: %w", err)
-	}
-
-	// Create admin user
-	adminUser := User{
-		Email:    adminEmail,
-		Name:     "Admin",
-		Role:     "super-admin",
-		Password: GenerateHash(adminPassword),
-	}
-
-	if err := db.Create(&adminUser).Error; err != nil {
-		return fmt.Errorf("error creating admin user: %w", err)
-	}
-
-	return nil
 }
