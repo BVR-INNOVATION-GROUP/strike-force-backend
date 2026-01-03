@@ -198,7 +198,15 @@ func Register(c *fiber.Ctx, db *gorm.DB) error {
 	} else {
 		// Regular user registration
 		id := c.Locals("user_id")
-		org.UserID = id.(uint)
+		userID := id.(uint)
+		
+		// Check if user already has an organization
+		var existingOrg Organization
+		if err := db.Where("user_id = ?", userID).First(&existingOrg).Error; err == nil {
+			return c.Status(400).JSON(fiber.Map{"msg": "you already have an organization registered"})
+		}
+		
+		org.UserID = userID
 		org.IsApproved = false
 	}
 
