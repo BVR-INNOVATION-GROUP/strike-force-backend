@@ -327,7 +327,6 @@ func SignUp(c *fiber.Ctx, db *gorm.DB) error {
 	if err := c.BodyParser(&user); err != nil {
 		return c.Status(401).JSON(fiber.Map{"msg": "invalid credentials"})
 	}
-	var tmpPassword = user.Password
 
 	// Hash the user-provided password
 	hashed := GenerateHash(user.Password)
@@ -359,9 +358,121 @@ func SignUp(c *fiber.Ctx, db *gorm.DB) error {
 		return c.Status(400).JSON(fiber.Map{"msg": "Invalid credentials submitted"})
 	}
 
-	// return c.Status(201).JSON(fiber.Map{"msg": "account created successfully"})
-	user.Password = tmpPassword
-	return Login(c, db)
+	// Reload user from DB to get all fields properly set
+	var createdUser User
+	if err := db.Where("email = ?", user.Email).First(&createdUser).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"msg": "failed to retrieve created user"})
+	}
+
+	// Load student record if user is a student to get courseId
+	if createdUser.Role == "student" {
+		var courseID uint
+		if err := db.Table("students").Where("user_id = ?", createdUser.ID).Select("course_id").Scan(&courseID).Error; err == nil && courseID > 0 {
+			createdUser.CourseID = courseID
+		}
+	}
+
+	var organizationPayload fiber.Map
+	needsOrganizationSetup := false
+
+	if requiresOrganization(createdUser.Role) {
+		// For partners and university-admins, find org by user_id
+		org, err := findOrganizationByUserID(db, createdUser.ID)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				// Organization doesn't exist yet - this is expected for new signups
+				needsOrganizationSetup = true
+			} else {
+				return c.Status(500).JSON(fiber.Map{"msg": "failed to load organization"})
+			}
+		} else {
+			organizationPayload = buildOrganizationResponse(org, createdUser.Email)
+			orgID := org.ID
+			createdUser.OrgID = &orgID
+
+			if !org.IsApproved {
+				return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+					"msg":   "organization pending approval",
+					"error": "ORGANIZATION_PENDING_APPROVAL",
+					"data": fiber.Map{
+						"organization": organizationPayload,
+					},
+				})
+			}
+		}
+	} else if createdUser.Role == "student" && createdUser.CourseID > 0 {
+		// For students, find org through course -> department -> organization
+		var orgID uint
+		if err := db.Table("courses").
+			Joins("JOIN departments ON courses.department_id = departments.id").
+			Where("courses.id = ?", createdUser.CourseID).
+			Select("departments.organization_id").
+			Scan(&orgID).Error; err == nil && orgID > 0 {
+			var org OrganizationRow
+			if err := db.Table("organizations").Where("id = ?", orgID).First(&org).Error; err == nil {
+				organizationPayload = buildOrganizationResponse(&org, createdUser.Email)
+				createdUser.OrgID = &orgID
+			}
+		}
+	} else if createdUser.Role == "supervisor" {
+		// For supervisors, find org through supervisor -> department -> organization
+		var orgID uint
+		if err := db.Table("supervisors").
+			Joins("JOIN departments ON supervisors.department_id = departments.id").
+			Where("supervisors.user_id = ?", createdUser.ID).
+			Select("departments.organization_id").
+			Scan(&orgID).Error; err == nil && orgID > 0 {
+			var org OrganizationRow
+			if err := db.Table("organizations").Where("id = ?", orgID).First(&org).Error; err == nil {
+				organizationPayload = buildOrganizationResponse(&org, createdUser.Email)
+				createdUser.OrgID = &orgID
+			}
+		}
+	} else if createdUser.Role == "delegated-admin" {
+		// For delegated admins, find org through delegated_access table
+		var orgID uint
+		if err := db.Table("delegated_accesses").
+			Where("delegated_user_id = ? AND is_active = ?", createdUser.ID, true).
+			Select("organization_id").
+			Scan(&orgID).Error; err == nil && orgID > 0 {
+			var org OrganizationRow
+			if err := db.Table("organizations").Where("id = ?", orgID).First(&org).Error; err == nil {
+				organizationPayload = buildOrganizationResponse(&org, createdUser.Email)
+				createdUser.OrgID = &orgID
+
+				if !org.IsApproved {
+					return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+						"msg":   "organization pending approval",
+						"error": "ORGANIZATION_PENDING_APPROVAL",
+						"data": fiber.Map{
+							"organization": organizationPayload,
+						},
+					})
+				}
+			}
+		}
+	}
+
+	token, tokenErr := GenerateToken(createdUser)
+	if tokenErr != nil {
+		return c.Status(400).JSON(fiber.Map{"msg": "failed to generate session token"})
+	}
+
+	// Password is excluded from JSON via json:"-" tag in User model
+	var data = map[string]any{
+		"token": token,
+		"user":  createdUser,
+	}
+
+	if organizationPayload != nil {
+		data["organization"] = organizationPayload
+	}
+
+	if needsOrganizationSetup {
+		data["needsOrganizationSetup"] = true
+	}
+
+	return c.Status(201).JSON(fiber.Map{"msg": "account created and logged in successfully", "data": data})
 
 }
 
