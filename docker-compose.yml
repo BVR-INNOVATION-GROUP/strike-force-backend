@@ -1,12 +1,26 @@
 services:
   database: 
-    image: postgres 
-    container_name: strikeforce6
+    image: postgres:15
+    container_name: strikeforce7
 
     environment:
       - POSTGRES_USER=admin
       - POSTGRES_PASSWORD=Admin@2025
-      - POSTGRES_DB=strikeforce_db4
+      - POSTGRES_DB=strikeforce_db
 
     ports:
-      - "5432:5432"  
+      - "5432:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d strikeforce_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:  

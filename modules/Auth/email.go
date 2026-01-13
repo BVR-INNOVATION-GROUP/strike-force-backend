@@ -12,6 +12,12 @@ import (
 
 // SendPasswordResetEmail dispatches the reset link to the user.
 func SendPasswordResetEmail(email, token, name string) error {
+	// Skip sending email in dev mode
+	if mailer.IsDevMode() {
+		fmt.Printf("Dev mode: Skipping password reset email for %s (token: %s)\n", email, token)
+		return nil
+	}
+
 	mailjetKey := os.Getenv("MAILJET_KEY")
 	mailjetSecret := os.Getenv("MAILJET_SECRET")
 	mailjetEmail := os.Getenv("MAILJET_EMAIL")

@@ -182,9 +182,11 @@ func buildOrganizationResponse(org *OrganizationRow, email string) fiber.Map {
 
 func Login(c *fiber.Ctx, db *gorm.DB) error {
 	// Use a separate struct for login request since Password field has json:"-" in User model
+	// Accepts either email or studentId (for students)
 	type LoginRequest struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
+		Email     string `json:"email"`
+		StudentID string `json:"studentId"`
+		Password  string `json:"password"`
 	}
 
 	var loginReq LoginRequest
@@ -192,22 +194,58 @@ func Login(c *fiber.Ctx, db *gorm.DB) error {
 		return c.Status(400).JSON(fiber.Map{"msg": "failed to verify the parsed information"})
 	}
 
-	var foundUser User
-	if err := db.Where("email = ?", loginReq.Email).First(&foundUser).Error; err != nil {
-		return c.Status(401).JSON(fiber.Map{"msg": "user not found"})
+	// Validate that either email or studentId is provided
+	if loginReq.Email == "" && loginReq.StudentID == "" {
+		return c.Status(400).JSON(fiber.Map{"msg": "email or studentId is required"})
+	}
 
+	var foundUser User
+	var err error
+
+	// Try to find user by email first, then by student ID
+	if loginReq.Email != "" {
+		err = db.Where("email = ?", loginReq.Email).First(&foundUser).Error
+	} else if loginReq.StudentID != "" {
+		// Find user through student record by student ID
+		// Only search for non-null student_id values
+		var userID uint
+		scanErr := db.Table("students").
+			Where("student_id = ? AND student_id IS NOT NULL", loginReq.StudentID).
+			Select("user_id").
+			Scan(&userID).Error
+		
+		if scanErr != nil || userID == 0 {
+			return c.Status(401).JSON(fiber.Map{"msg": "user not found"})
+		}
+		err = db.Where("id = ?", userID).First(&foundUser).Error
+	}
+
+	if err != nil {
+		return c.Status(401).JSON(fiber.Map{"msg": "user not found"})
 	}
 
 	if !IsPasswordValid(foundUser.Password, loginReq.Password) {
 		return c.Status(401).JSON(fiber.Map{"msg": "invalid password"})
 	}
 
-	// Load student record if user is a student to get courseId
+	// Load student record if user is a student to get courseId and DNA snapshot status
 	// Query students table directly to avoid import cycle
+	var isFirstLogin bool
 	if foundUser.Role == "student" {
-		var courseID uint
-		if err := db.Table("students").Where("user_id = ?", foundUser.ID).Select("course_id").Scan(&courseID).Error; err == nil && courseID > 0 {
-			foundUser.CourseID = courseID
+		type StudentData struct {
+			CourseID                uint `gorm:"column:course_id"`
+			HasCompletedDNASnapshot bool `gorm:"column:has_completed_dna_snapshot"`
+		}
+		var studentData StudentData
+		if err := db.Table("students").Where("user_id = ?", foundUser.ID).Select("course_id, has_completed_dna_snapshot").Scan(&studentData).Error; err == nil {
+			if studentData.CourseID > 0 {
+				foundUser.CourseID = studentData.CourseID
+			}
+			// isFirstLogin is true if DNA snapshot has NOT been completed
+			isFirstLogin = !studentData.HasCompletedDNASnapshot
+		} else {
+			// If student record doesn't exist or query fails, treat as first login
+			isFirstLogin = true
 		}
 	}
 
@@ -328,6 +366,11 @@ func Login(c *fiber.Ctx, db *gorm.DB) error {
 
 	if needsOrganizationSetup {
 		data["needsOrganizationSetup"] = true
+	}
+
+	// Add isFirstLogin flag for students
+	if foundUser.Role == "student" {
+		data["isFirstLogin"] = isFirstLogin
 	}
 
 	return c.JSON(fiber.Map{"msg": "logged in successfully", "data": data})

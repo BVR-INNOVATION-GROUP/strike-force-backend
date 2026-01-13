@@ -4,9 +4,19 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/mailjet/mailjet-apiv3-go/v4"
 )
+
+// IsDevMode checks if the application is running in dev mode
+// Returns true if MODE environment variable is set to "dev" (case-insensitive)
+// Returns false if MODE is empty, not set, or any other value
+func IsDevMode() bool {
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv("MODE")))
+	return mode == "dev"
+}
 
 // InterpretMailjetError logs additional context for Mailjet failures and
 // returns a wrapped error with more descriptive messaging.

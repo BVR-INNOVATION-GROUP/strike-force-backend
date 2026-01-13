@@ -96,6 +96,12 @@ func SendOrganizationUpdateEmail(org Organization, recipient string) error {
 }
 
 func sendOrganizationEmail(to, subject, html, text, context string) error {
+	// Skip sending email in dev mode
+	if mailer.IsDevMode() {
+		fmt.Printf("Dev mode: Skipping organization email (%s) to %s\n", context, to)
+		return nil
+	}
+
 	mailjetKey := os.Getenv("MAILJET_KEY")
 	mailjetSecret := os.Getenv("MAILJET_SECRET")
 	mailjetEmail := os.Getenv("MAILJET_EMAIL")

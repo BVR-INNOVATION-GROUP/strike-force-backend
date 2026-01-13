@@ -1,12 +1,16 @@
 package student
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
+	"time"
 
 	course "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Course"
+	branch "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Branch"
 	user "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/User"
 	"github.com/gofiber/fiber/v2"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -56,15 +60,44 @@ func createStudentForCourse(db *gorm.DB, courseId uint64, req CreateStudentReque
 		return Student{}, "", fmt.Errorf("failed to create user: %w", err)
 	}
 
+	// Load course and branch for ID generation
+	var courseRecord course.Course
+	if err := db.First(&courseRecord, courseId).Error; err != nil {
+		db.Delete(&newUser)
+		return Student{}, "", fmt.Errorf("failed to load course: %w", err)
+	}
+
+	var branchRecord *branch.Branch
+	if req.BranchID != nil {
+		var branch branch.Branch
+		if err := db.First(&branch, *req.BranchID).Error; err == nil {
+			branchRecord = &branch
+		}
+	}
+
+	// Set default enrollment year if not provided
+	enrollmentYear := req.EnrollmentYear
+	if enrollmentYear == 0 {
+		enrollmentYear = time.Now().Year() // Default to current year
+	}
+
+	// Generate student ID
+	studentID, err := GenerateStudentID(db, courseRecord, branchRecord, req.District, enrollmentYear)
+	if err != nil {
+		db.Delete(&newUser)
+		return Student{}, "", fmt.Errorf("failed to generate student ID: %w", err)
+	}
+
 	student := Student{
 		UserID:         newUser.ID,
+		StudentID:      &studentID,
 		CourseID:       uint(courseId),
-		BranchID:        req.BranchID,
+		BranchID:       req.BranchID,
 		Gender:         req.Gender,
 		District:       req.District,
 		UniversityBranch: req.UniversityBranch, // Keep for backward compatibility
 		BirthYear:      req.BirthYear,
-		EnrollmentYear: req.EnrollmentYear,
+		EnrollmentYear: enrollmentYear,
 	}
 
 	if err := db.Create(&student).Error; err != nil {
@@ -72,7 +105,7 @@ func createStudentForCourse(db *gorm.DB, courseId uint64, req CreateStudentReque
 		return Student{}, "", fmt.Errorf("failed to create student record: %w", err)
 	}
 
-	db.Preload("User").Preload("Course").First(&student, student.ID)
+	db.Preload("User").Preload("Course").Preload("Branch").First(&student, student.ID)
 	return student, randomPassword, nil
 }
 
@@ -123,6 +156,35 @@ func Create(c *fiber.Ctx, db *gorm.DB) error {
 	// Set the user ID for the student record
 	student.UserID = tmpUser.ID
 	// CourseID is already set from the request body
+
+	// Load course and branch for ID generation
+	var courseRecord course.Course
+	if err := db.First(&courseRecord, student.CourseID).Error; err != nil {
+		db.Delete(&tmpUser)
+		return c.Status(400).JSON(fiber.Map{"msg": "failed to load course: " + err.Error()})
+	}
+
+	var branchRecord *branch.Branch
+	if student.BranchID != nil {
+		var branch branch.Branch
+		if err := db.First(&branch, *student.BranchID).Error; err == nil {
+			branchRecord = &branch
+		}
+	}
+
+	// Set default enrollment year if not provided
+	enrollmentYear := student.EnrollmentYear
+	if enrollmentYear == 0 {
+		enrollmentYear = time.Now().Year() // Default to current year
+	}
+
+	// Generate student ID
+	studentID, err := GenerateStudentID(db, courseRecord, branchRecord, student.District, enrollmentYear)
+	if err != nil {
+		db.Delete(&tmpUser)
+		return c.Status(400).JSON(fiber.Map{"msg": "failed to generate student ID: " + err.Error()})
+	}
+	student.StudentID = &studentID
 
 	// Create the student record
 	if err := db.Create(&student).Error; err != nil {
@@ -383,4 +445,444 @@ func CreateBulkForCourse(c *fiber.Ctx, db *gorm.DB) error {
 	}
 
 	return c.Status(201).JSON(status)
+}
+
+// DNA Snapshot types and functions
+type DNASnapshotRequest struct {
+	Responses map[string]string `json:"responses"` // question_id -> answer
+}
+
+type DNAArchetype struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Traits      []string `json:"traits"`
+}
+
+// CalculateDNAArchetype determines the student's DNA archetype based on their responses
+func CalculateDNAArchetype(responses map[string]string) DNAArchetype {
+	// Scoring system for different archetypes
+	scores := map[string]int{
+		"builder":     0,
+		"explorer":    0,
+		"strategist":  0,
+		"collaborator": 0,
+	}
+
+	// Question 1: Orientation
+	if responses["q1"] == "I jump in and figure things out as I go" {
+		scores["builder"] += 3
+		scores["explorer"] += 2
+	} else if responses["q1"] == "I observe first, then act carefully" {
+		scores["strategist"] += 3
+		scores["collaborator"] += 2
+	} else if responses["q1"] == "I prefer structured guidance before acting" {
+		scores["collaborator"] += 3
+	} else if responses["q1"] == "I wait until I'm confident I can deliver well" {
+		scores["strategist"] += 2
+	}
+
+	// Question 2: Energy source
+	if responses["q2"] == "Solving real-world problems" {
+		scores["builder"] += 3
+	} else if responses["q2"] == "Learning new skills" {
+		scores["explorer"] += 3
+	} else if responses["q2"] == "Working with ambitious people" {
+		scores["collaborator"] += 3
+	} else if responses["q2"] == "Building something of my own" {
+		scores["builder"] += 2
+		scores["explorer"] += 2
+	}
+
+	// Question 3: Environment
+	if responses["q3"] == "Fast-moving and unstructured" {
+		scores["explorer"] += 3
+		scores["builder"] += 2
+	} else if responses["q3"] == "Clear goals with some flexibility" {
+		scores["builder"] += 3
+		scores["strategist"] += 2
+	} else if responses["q3"] == "Well-defined roles and expectations" {
+		scores["collaborator"] += 3
+	} else if responses["q3"] == "Independent, self-directed work" {
+		scores["explorer"] += 2
+		scores["strategist"] += 2
+	}
+
+	// Question 4: Exposure level
+	if responses["q4"] == "Leading or owning project outcomes" {
+		scores["builder"] += 3
+		scores["strategist"] += 2
+	} else if responses["q4"] == "Active contributor on real projects" {
+		scores["builder"] += 2
+		scores["collaborator"] += 2
+	}
+
+	// Question 5: Team role
+	if responses["q5"] == "Organises and coordinates" {
+		scores["strategist"] += 3
+		scores["collaborator"] += 2
+	} else if responses["q5"] == "Builds or executes" {
+		scores["builder"] += 3
+	} else if responses["q5"] == "Thinks through strategy and direction" {
+		scores["strategist"] += 3
+		scores["explorer"] += 2
+	} else if responses["q5"] == "Supports and improves what exists" {
+		scores["collaborator"] += 3
+	}
+
+	// Question 6: Ownership comfort
+	if responses["q6"] == "I like full ownership and accountability" {
+		scores["builder"] += 3
+		scores["strategist"] += 2
+	} else if responses["q6"] == "I'm comfortable owning parts of work" {
+		scores["builder"] += 2
+		scores["collaborator"] += 2
+	}
+
+	// Question 7: Handling mistakes
+	if responses["q7"] == "Push through independently" {
+		scores["builder"] += 2
+		scores["explorer"] += 2
+	} else if responses["q7"] == "Ask for feedback and support" {
+		scores["collaborator"] += 3
+	} else if responses["q7"] == "Step back and reassess direction" {
+		scores["strategist"] += 3
+	}
+
+	// Question 8: Future direction
+	if responses["q8"] == "Entrepreneurship or venture building" {
+		scores["builder"] += 3
+		scores["explorer"] += 2
+	} else if responses["q8"] == "Freelance / independent work" {
+		scores["explorer"] += 3
+	} else if responses["q8"] == "Employment and career growth" {
+		scores["collaborator"] += 2
+		scores["strategist"] += 2
+	}
+
+	// Question 9: StrikeForce value
+	if responses["q9"] == "Real project experience" {
+		scores["builder"] += 3
+	} else if responses["q9"] == "Clarity on my strengths" {
+		scores["explorer"] += 2
+		scores["strategist"] += 2
+	} else if responses["q9"] == "Networks and mentors" {
+		scores["collaborator"] += 3
+	} else if responses["q9"] == "A place to build long-term credibility" {
+		scores["strategist"] += 2
+		scores["builder"] += 2
+	}
+
+	// Question 10: Community engagement
+	if responses["q10"] == "I actively participate in communities" {
+		scores["collaborator"] += 3
+	} else if responses["q10"] == "I often initiate or organise groups" {
+		scores["strategist"] += 3
+		scores["collaborator"] += 2
+	} else if responses["q10"] == "I prefer working independently" {
+		scores["explorer"] += 2
+		scores["builder"] += 2
+	}
+
+	// Question 11: Purpose-driven association
+	if responses["q11"] == "Yes" {
+		scores["collaborator"] += 2
+		scores["strategist"] += 2
+	}
+
+	// Question 12: Time commitment
+	if responses["q12"] == "7–10 hours/week" || responses["q12"] == "Depends on the opportunity" {
+		scores["builder"] += 2
+		scores["explorer"] += 2
+	}
+
+	// Find the archetype with highest score
+	maxScore := 0
+	archetypeName := "builder" // default
+	for name, score := range scores {
+		if score > maxScore {
+			maxScore = score
+			archetypeName = name
+		}
+	}
+
+	// Return archetype details
+	archetypes := map[string]DNAArchetype{
+		"builder": {
+			Name:        "The Builder",
+			Description: "You are drawn to action, ownership, and learning by doing. You perform best when working on real problems and taking responsibility for outcomes.",
+			Traits: []string{
+				"Action-oriented",
+				"Ownership-driven",
+				"Problem-solver",
+				"Results-focused",
+			},
+		},
+		"explorer": {
+			Name:        "The Explorer",
+			Description: "You thrive on discovery, learning, and independence. You're comfortable navigating uncertainty and building your own path.",
+			Traits: []string{
+				"Curious",
+				"Independent",
+				"Adaptable",
+				"Self-directed",
+			},
+		},
+		"strategist": {
+			Name:        "The Strategist",
+			Description: "You think ahead, organize effectively, and create clarity from complexity. You excel at planning and direction-setting.",
+			Traits: []string{
+				"Analytical",
+				"Organized",
+				"Forward-thinking",
+				"Direction-setting",
+			},
+		},
+		"collaborator": {
+			Name:        "The Collaborator",
+			Description: "You build through relationships, support others, and create value in team settings. You thrive in structured, supportive environments.",
+			Traits: []string{
+				"Relationship-focused",
+				"Supportive",
+				"Team-oriented",
+				"Community-minded",
+			},
+		},
+	}
+
+	if archetype, ok := archetypes[archetypeName]; ok {
+		return archetype
+	}
+
+	// Fallback
+	return archetypes["builder"]
+}
+
+// SubmitDNASnapshot handles DNA snapshot submission
+func SubmitDNASnapshot(c *fiber.Ctx, db *gorm.DB) error {
+	userID := c.Locals("user_id").(uint)
+
+	// Find student record
+	var student Student
+	if err := db.Where("user_id = ?", userID).First(&student).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return c.Status(404).JSON(fiber.Map{"msg": "student record not found"})
+		}
+		return c.Status(500).JSON(fiber.Map{"msg": "failed to find student record"})
+	}
+
+	// Check if already completed
+	if student.HasCompletedDNASnapshot {
+		return c.Status(400).JSON(fiber.Map{"msg": "DNA snapshot already completed"})
+	}
+
+	var req DNASnapshotRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"msg": "invalid request: " + err.Error()})
+	}
+
+	// Validate that we have responses
+	if len(req.Responses) == 0 {
+		return c.Status(400).JSON(fiber.Map{"msg": "responses are required"})
+	}
+
+	// Calculate archetype
+	archetype := CalculateDNAArchetype(req.Responses)
+
+	// Convert responses to JSON
+	responsesJSON, err := json.Marshal(req.Responses)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"msg": "failed to process responses"})
+	}
+
+	// Update student record
+	now := time.Now()
+	responsesJSONData := datatypes.JSON(responsesJSON)
+	archetypeName := archetype.Name
+	student.HasCompletedDNASnapshot = true
+	student.DNASnapshotResponses = &responsesJSONData
+	student.DNAArchetype = &archetypeName
+	student.DNASnapshotCompletedAt = &now
+
+	if err := db.Save(&student).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"msg": "failed to save DNA snapshot: " + err.Error()})
+	}
+
+	return c.JSON(fiber.Map{
+		"msg": "DNA snapshot completed successfully",
+		"data": fiber.Map{
+			"archetype": archetype,
+		},
+	})
+}
+
+// GetDNASnapshot retrieves the student's DNA snapshot (if completed)
+func GetDNASnapshot(c *fiber.Ctx, db *gorm.DB) error {
+	userID := c.Locals("user_id").(uint)
+
+	var student Student
+	if err := db.Where("user_id = ?", userID).First(&student).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return c.Status(404).JSON(fiber.Map{"msg": "student record not found"})
+		}
+		return c.Status(500).JSON(fiber.Map{"msg": "failed to find student record"})
+	}
+
+	if !student.HasCompletedDNASnapshot {
+		return c.Status(404).JSON(fiber.Map{"msg": "DNA snapshot not completed"})
+	}
+
+	// Reconstruct archetype from stored name
+	archetypes := map[string]DNAArchetype{
+		"The Builder": {
+			Name:        "The Builder",
+			Description: "You are drawn to action, ownership, and learning by doing. You perform best when working on real problems and taking responsibility for outcomes.",
+			Traits: []string{
+				"Action-oriented",
+				"Ownership-driven",
+				"Problem-solver",
+				"Results-focused",
+			},
+		},
+		"The Explorer": {
+			Name:        "The Explorer",
+			Description: "You thrive on discovery, learning, and independence. You're comfortable navigating uncertainty and building your own path.",
+			Traits: []string{
+				"Curious",
+				"Independent",
+				"Adaptable",
+				"Self-directed",
+			},
+		},
+		"The Strategist": {
+			Name:        "The Strategist",
+			Description: "You think ahead, organize effectively, and create clarity from complexity. You excel at planning and direction-setting.",
+			Traits: []string{
+				"Analytical",
+				"Organized",
+				"Forward-thinking",
+				"Direction-setting",
+			},
+		},
+		"The Collaborator": {
+			Name:        "The Collaborator",
+			Description: "You build through relationships, support others, and create value in team settings. You thrive in structured, supportive environments.",
+			Traits: []string{
+				"Relationship-focused",
+				"Supportive",
+				"Team-oriented",
+				"Community-minded",
+			},
+		},
+	}
+
+	var archetypeName string
+	if student.DNAArchetype != nil {
+		archetypeName = *student.DNAArchetype
+	} else {
+		archetypeName = "The Builder" // fallback
+	}
+
+	archetype, ok := archetypes[archetypeName]
+	if !ok {
+		archetype = archetypes["The Builder"] // fallback
+	}
+
+	return c.JSON(fiber.Map{
+		"data": fiber.Map{
+			"archetype":     archetype,
+			"completedAt":   student.DNASnapshotCompletedAt,
+			"hasCompleted":  student.HasCompletedDNASnapshot,
+		},
+	})
+}
+
+// GetStudentDNASnapshot retrieves a student's DNA snapshot (admin access)
+func GetStudentDNASnapshot(c *fiber.Ctx, db *gorm.DB) error {
+	studentIdParam := c.Params("studentId")
+	studentId, err := strconv.ParseUint(studentIdParam, 10, 64)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"msg": "invalid student ID"})
+	}
+
+	var student Student
+	if err := db.First(&student, studentId).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return c.Status(404).JSON(fiber.Map{"msg": "student not found"})
+		}
+		return c.Status(500).JSON(fiber.Map{"msg": "failed to find student"})
+	}
+
+	if !student.HasCompletedDNASnapshot {
+		return c.JSON(fiber.Map{
+			"data": fiber.Map{
+				"hasCompleted": false,
+				"archetype":     nil,
+				"completedAt":   nil,
+			},
+		})
+	}
+
+	// Reconstruct archetype from stored name
+	archetypes := map[string]DNAArchetype{
+		"The Builder": {
+			Name:        "The Builder",
+			Description: "You are drawn to action, ownership, and learning by doing. You perform best when working on real problems and taking responsibility for outcomes.",
+			Traits: []string{
+				"Action-oriented",
+				"Ownership-driven",
+				"Problem-solver",
+				"Results-focused",
+			},
+		},
+		"The Explorer": {
+			Name:        "The Explorer",
+			Description: "You thrive on discovery, learning, and independence. You're comfortable navigating uncertainty and building your own path.",
+			Traits: []string{
+				"Curious",
+				"Independent",
+				"Adaptable",
+				"Self-directed",
+			},
+		},
+		"The Strategist": {
+			Name:        "The Strategist",
+			Description: "You think ahead, organize effectively, and create clarity from complexity. You excel at planning and direction-setting.",
+			Traits: []string{
+				"Analytical",
+				"Organized",
+				"Forward-thinking",
+				"Direction-setting",
+			},
+		},
+		"The Collaborator": {
+			Name:        "The Collaborator",
+			Description: "You build through relationships, support others, and create value in team settings. You thrive in structured, supportive environments.",
+			Traits: []string{
+				"Relationship-focused",
+				"Supportive",
+				"Team-oriented",
+				"Community-minded",
+			},
+		},
+	}
+
+	var archetypeName string
+	if student.DNAArchetype != nil {
+		archetypeName = *student.DNAArchetype
+	} else {
+		archetypeName = "The Builder" // fallback
+	}
+
+	archetype, ok := archetypes[archetypeName]
+	if !ok {
+		archetype = archetypes["The Builder"] // fallback
+	}
+
+	return c.JSON(fiber.Map{
+		"data": fiber.Map{
+			"archetype":     archetype,
+			"completedAt":   student.DNASnapshotCompletedAt,
+			"hasCompleted":  student.HasCompletedDNASnapshot,
+		},
+	})
 }

@@ -11,6 +11,12 @@ import (
 
 // SendDelegatedAccessEmail sends an email with login credentials to a delegated user
 func SendDelegatedAccessEmail(email, name, password, organizationName, delegatorName string) error {
+	// Skip sending email in dev mode
+	if mailer.IsDevMode() {
+		fmt.Printf("Dev mode: Skipping delegated access email for %s (password: %s)\n", email, password)
+		return nil
+	}
+
 	mailjetKey := os.Getenv("MAILJET_KEY")
 	mailjetSecret := os.Getenv("MAILJET_SECRET")
 	mailjetEmail := os.Getenv("MAILJET_EMAIL")
@@ -90,6 +96,9 @@ func SendDelegatedAccessEmail(email, name, password, organizationName, delegator
 	_, err := mj.SendMailV31(&messages)
 	return mailer.InterpretMailjetError(err, "delegated access email")
 }
+
+
+
 
 
 

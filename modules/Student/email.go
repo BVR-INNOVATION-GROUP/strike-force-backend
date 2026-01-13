@@ -34,6 +34,12 @@ func GenerateRandomPassword(length int) (string, error) {
 
 // SendPasswordEmail sends an email with the password to the student
 func SendPasswordEmail(studentEmail, studentName, password string) error {
+	// Skip sending email in dev mode
+	if mailer.IsDevMode() {
+		fmt.Printf("Dev mode: Skipping password email for %s (password: %s)\n", studentEmail, password)
+		return nil
+	}
+
 	mailjetKey := os.Getenv("MAILJET_KEY")
 	mailjetSecret := os.Getenv("MAILJET_SECRET")
 	mailjetEmail := os.Getenv("MAILJET_EMAIL")

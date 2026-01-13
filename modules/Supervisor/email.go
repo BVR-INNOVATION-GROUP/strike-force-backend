@@ -11,6 +11,12 @@ import (
 
 // SendPasswordEmail sends an email with the password and login link to the supervisor
 func SendPasswordEmail(supervisorEmail, supervisorName, password, loginURL string) error {
+	// Skip sending email in dev mode
+	if mailer.IsDevMode() {
+		fmt.Printf("Dev mode: Skipping password email for supervisor %s (password: %s)\n", supervisorEmail, password)
+		return nil
+	}
+
 	mailjetKey := os.Getenv("MAILJET_KEY")
 	mailjetSecret := os.Getenv("MAILJET_SECRET")
 	mailjetEmail := os.Getenv("MAILJET_EMAIL")

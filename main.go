@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 
 	"github.com/BVR-INNOVATION-GROUP/strike-force-backend/config"
 	analytics "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Analytics"
@@ -27,7 +28,80 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/joho/godotenv"
+	"gorm.io/gorm"
 )
+
+// initializeSuperAdmin creates a super admin user if one doesn't exist
+func initializeSuperAdmin(db *gorm.DB) error {
+	// Get super admin credentials from environment variables
+	superAdminEmail := os.Getenv("SUPER_ADMIN_EMAIL")
+	if superAdminEmail == "" {
+		superAdminEmail = "admin@strikeforce.com" // Default email
+	}
+
+	superAdminPassword := os.Getenv("SUPER_ADMIN_PASSWORD")
+	if superAdminPassword == "" {
+		superAdminPassword = "admin123" // Default password - should be changed in production
+	}
+
+	superAdminName := os.Getenv("SUPER_ADMIN_NAME")
+	if superAdminName == "" {
+		superAdminName = "Super Admin" // Default name
+	}
+
+	// Check if any super admin already exists
+	var existingSuperAdmin user.User
+	result := db.Where("role = ?", "super-admin").First(&existingSuperAdmin)
+	
+	if result.Error == nil {
+		// Super admin already exists
+		log.Printf("Super admin already exists: %s", existingSuperAdmin.Email)
+		return nil
+	}
+
+	if result.Error != gorm.ErrRecordNotFound {
+		// Some other error occurred
+		return fmt.Errorf("error checking for super admin: %w", result.Error)
+	}
+
+	// Check if the email is already taken by another user
+	var existingUser user.User
+	if err := db.Where("email = ?", superAdminEmail).First(&existingUser).Error; err == nil {
+		// Email exists but not as super-admin, update the role
+		existingUser.Role = "super-admin"
+		if err := db.Save(&existingUser).Error; err != nil {
+			return fmt.Errorf("failed to update user to super admin: %w", err)
+		}
+		log.Printf("Updated existing user to super admin: %s", superAdminEmail)
+		return nil
+	} else if err != gorm.ErrRecordNotFound {
+		return fmt.Errorf("error checking for existing user: %w", err)
+	}
+
+	// Create super admin
+	hashedPassword := user.GenerateHash(superAdminPassword)
+	if hashedPassword == "" {
+		return fmt.Errorf("failed to hash super admin password")
+	}
+
+	superAdmin := user.User{
+		Email:    superAdminEmail,
+		Name:     superAdminName,
+		Role:     "super-admin",
+		Password: hashedPassword,
+		Profile: user.Profile{
+			Bio:      "Platform administrator",
+			Location: "Global",
+		},
+	}
+
+	if err := db.Create(&superAdmin).Error; err != nil {
+		return fmt.Errorf("failed to create super admin: %w", err)
+	}
+
+	log.Printf("Super admin created successfully: %s (password: %s)", superAdminEmail, superAdminPassword)
+	return nil
+}
 
 func main() {
 	log.Println("Starting application...")
@@ -50,6 +124,14 @@ func main() {
 		log.Fatal("Failed to connect to DB : " + DBError.Error())
 	}
 	log.Println("Database connected successfully")
+
+	// Initialize super admin if it doesn't exist
+	log.Println("Checking for super admin...")
+	if err := initializeSuperAdmin(DB); err != nil {
+		log.Printf("Warning: Failed to initialize super admin: %v", err)
+	} else {
+		log.Println("Super admin check completed")
+	}
 
 	// Serve static files (uploads)
 	app.Static("/uploads", "./uploads")
@@ -79,7 +161,13 @@ func main() {
 	log.Println("All routes registered successfully")
 
 	// Get port from environment (Railway uses PORT, local dev uses APP_PORT)
-	port := "3000"
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = os.Getenv("APP_PORT")
+	}
+	if port == "" {
+		port = "3000" // Default fallback
+	}
 
 	fmt.Println("Server starting on port " + port)
 	if err := app.Listen("0.0.0.0:" + port); err != nil {

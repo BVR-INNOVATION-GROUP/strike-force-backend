@@ -50,5 +50,7 @@ jobs:
             -e MAILJET_SECRET=${{ secrets.MAILJET_SECRET }} \
             -e MAILJET_EMAIL=${{ secrets.MAILJET_EMAIL }} \
             -e MAILJET_FROM=${{ secrets.MAILJET_FROM }} \
+            -e SUPER_ADMIN_EMAIL=${{ secrets.SUPER_ADMIN_EMAIL }} \
+            -e SUPER_ADMIN_PASSWORD=${{ secrets.SUPER_ADMIN_PASSWORD }} \
             --restart always \
             ${{ secrets.DOCKER_USERNAME }}/strikeforcev1:latest
