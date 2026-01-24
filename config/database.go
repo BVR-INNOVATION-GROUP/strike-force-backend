@@ -63,25 +63,55 @@ func ensureStudentIDColumn(db *gorm.DB) {
 }
 
 func ConnectToDB() (*gorm.DB, error) {
-	// Get SSL mode from environment, default to "disable" for local development
+	// Get required database configuration from environment
+	dbHost := os.Getenv("DB_HOST")
+	dbPort := os.Getenv("DB_PORT")
+	dbUser := os.Getenv("DB_USER")
+	dbPassword := os.Getenv("DB_PASSWORD")
+	dbName := os.Getenv("DB_NAME")
 	sslMode := os.Getenv("DB_SSLMODE")
-	if sslMode == "" {
-		sslMode = "disable" // Default for local Docker PostgreSQL
+
+	// Validate required environment variables
+	var missingVars []string
+	if dbHost == "" {
+		missingVars = append(missingVars, "DB_HOST")
+	}
+	if dbPort == "" {
+		missingVars = append(missingVars, "DB_PORT")
+	}
+	if dbUser == "" {
+		missingVars = append(missingVars, "DB_USER")
+	}
+	if dbPassword == "" {
+		missingVars = append(missingVars, "DB_PASSWORD")
+	}
+	if dbName == "" {
+		missingVars = append(missingVars, "DB_NAME")
 	}
 
+	if len(missingVars) > 0 {
+		return nil, fmt.Errorf("missing required database environment variables: %v. Please set these environment variables before starting the application", missingVars)
+	}
+
+	// Default SSL mode to "disable" for local development
+	if sslMode == "" {
+		sslMode = "disable"
+	}
+
+	// Construct DSN
 	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
-		os.Getenv("DB_HOST"),
-		os.Getenv("DB_PORT"),
-		os.Getenv("DB_USER"),
-		os.Getenv("DB_PASSWORD"),
-		os.Getenv("DB_NAME"),
+		dbHost,
+		dbPort,
+		dbUser,
+		dbPassword,
+		dbName,
 		sslMode,
 	)
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to initialize database, got error %w", err)
 	}
 
 	migrationErr := db.AutoMigrate(&user.User{}, &organization.Organization{}, &branch.Branch{}, &college.College{}, &course.Course{}, &department.Department{}, &project.Project{}, &milestone.Milestone{}, &application.Application{}, &chat.Message{}, &dispute.Dispute{}, &invitation.Invitation{}, &notification.Notification{}, &student.Student{}, &supervisor.Supervisor{}, &supervisorrequest.SupervisorRequest{}, &portfolio.PortfolioItem{}, &auth.PasswordResetToken{}, &delegatedaccess.DelegatedAccess{})

@@ -1,7 +1,7 @@
 services:
   database: 
     image: postgres:15
-    container_name: strikeforce7
+    container_name: strikeforce8
 
     environment:
       - POSTGRES_USER=admin
