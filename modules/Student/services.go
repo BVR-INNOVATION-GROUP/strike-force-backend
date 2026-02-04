@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	course "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Course"
@@ -30,6 +31,63 @@ type BulkStudentsRequest struct {
 	Students []CreateStudentRequest `json:"students"`
 }
 
+// isDuplicateEmailError returns true if the error is a PostgreSQL unique constraint violation on email
+func isDuplicateEmailError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := strings.ToLower(err.Error())
+	return strings.Contains(errStr, "23505") ||
+		(strings.Contains(errStr, "unique constraint") && strings.Contains(errStr, "email")) ||
+		strings.Contains(errStr, "duplicate key")
+}
+
+// enrollExistingUserInCourse adds an existing user as a student to a course
+func enrollExistingUserInCourse(db *gorm.DB, courseId uint64, existingUser user.User, req CreateStudentRequest) (Student, string, error) {
+	var courseRecord course.Course
+	if err := db.First(&courseRecord, courseId).Error; err != nil {
+		return Student{}, "", fmt.Errorf("failed to load course: %w", err)
+	}
+
+	var branchRecord *branch.Branch
+	if req.BranchID != nil {
+		var branch branch.Branch
+		if err := db.First(&branch, *req.BranchID).Error; err == nil {
+			branchRecord = &branch
+		}
+	}
+
+	enrollmentYear := req.EnrollmentYear
+	if enrollmentYear == 0 {
+		enrollmentYear = time.Now().Year()
+	}
+
+	studentID, err := GenerateStudentID(db, courseRecord, branchRecord, req.District, enrollmentYear)
+	if err != nil {
+		return Student{}, "", fmt.Errorf("failed to generate student ID: %w", err)
+	}
+
+	student := Student{
+		UserID:         existingUser.ID,
+		StudentID:      &studentID,
+		CourseID:       uint(courseId),
+		BranchID:       req.BranchID,
+		Gender:         req.Gender,
+		District:       req.District,
+		UniversityBranch: req.UniversityBranch,
+		BirthYear:      req.BirthYear,
+		EnrollmentYear: enrollmentYear,
+	}
+
+	if err := db.Create(&student).Error; err != nil {
+		return Student{}, "", fmt.Errorf("failed to create student record: %w", err)
+	}
+
+	db.Preload("User").Preload("Course").Preload("Branch").First(&student, student.ID)
+	// Empty password - no email to send since user already has an account
+	return student, "", nil
+}
+
 func createStudentForCourse(db *gorm.DB, courseId uint64, req CreateStudentRequest) (Student, string, error) {
 	if req.Email == "" {
 		return Student{}, "", fmt.Errorf("email is required")
@@ -40,7 +98,13 @@ func createStudentForCourse(db *gorm.DB, courseId uint64, req CreateStudentReque
 
 	var existingUser user.User
 	if err := db.Where("email = ?", req.Email).First(&existingUser).Error; err == nil {
-		return Student{}, "", fmt.Errorf("user with email %s already exists", req.Email)
+		// User exists - enroll them in this course if not already enrolled
+		var existingStudent Student
+		if err := db.Where("user_id = ? AND course_id = ?", existingUser.ID, courseId).First(&existingStudent).Error; err == nil {
+			return Student{}, "", fmt.Errorf("student with email %s is already enrolled in this course", req.Email)
+		}
+		// Enroll existing user in the course (no new user creation, no password email)
+		return enrollExistingUserInCourse(db, courseId, existingUser, req)
 	}
 
 	randomPassword, err := GenerateRandomPassword(12)
@@ -57,6 +121,9 @@ func createStudentForCourse(db *gorm.DB, courseId uint64, req CreateStudentReque
 	}
 
 	if err := db.Create(&newUser).Error; err != nil {
+		if isDuplicateEmailError(err) {
+			return Student{}, "", fmt.Errorf("a user with email %s already exists. You can add them to this course using the same email", req.Email)
+		}
 		return Student{}, "", fmt.Errorf("failed to create user: %w", err)
 	}
 
@@ -226,11 +293,22 @@ func CreateForCourse(c *fiber.Ctx, db *gorm.DB) error {
 		return c.Status(400).JSON(fiber.Map{"msg": err.Error()})
 	}
 
-	if err := SendPasswordEmail(req.Email, req.Name, password); err != nil {
-		fmt.Printf("Warning: Failed to send password email to %s: %v\n", req.Email, err)
+	// Only send password email for newly created users (existing users already have accounts)
+	credentialsSent := false
+	if password != "" {
+		if err := SendPasswordEmail(req.Email, req.Name, password); err != nil {
+			fmt.Printf("Warning: Failed to send password email to %s: %v\n", req.Email, err)
+		} else {
+			credentialsSent = true
+		}
 	}
 
-	return c.Status(201).JSON(fiber.Map{"msg": "student created successfully", "data": student})
+	msg := "student created successfully"
+	if !credentialsSent && password == "" {
+		msg = "student added to course successfully (existing user - they can log in with their current credentials)"
+	}
+
+	return c.Status(201).JSON(fiber.Map{"msg": msg, "data": student, "credentialsSent": credentialsSent})
 }
 
 func FindByCourse(c *fiber.Ctx, db *gorm.DB) error {
@@ -424,8 +502,10 @@ func CreateBulkForCourse(c *fiber.Ctx, db *gorm.DB) error {
 			continue
 		}
 
-		if err := SendPasswordEmail(studentReq.Email, studentReq.Name, password); err != nil {
-			fmt.Printf("Warning: Failed to send password email to %s: %v\n", studentReq.Email, err)
+		if password != "" {
+			if err := SendPasswordEmail(studentReq.Email, studentReq.Name, password); err != nil {
+				fmt.Printf("Warning: Failed to send password email to %s: %v\n", studentReq.Email, err)
+			}
 		}
 
 		successes = append(successes, student)

@@ -28,6 +28,28 @@ import (
 	"gorm.io/gorm"
 )
 
+// ensureStudentDNASnapshotColumns adds DNA Snapshot columns to students table if missing
+// Handles databases created before these columns were added to the model
+func ensureStudentDNASnapshotColumns(db *gorm.DB) {
+	columns := []struct {
+		sql  string
+		name string
+	}{
+		{`ALTER TABLE students ADD COLUMN has_completed_dna_snapshot BOOLEAN DEFAULT false`, "has_completed_dna_snapshot"},
+		{`ALTER TABLE students ADD COLUMN dna_snapshot_responses JSONB`, "dna_snapshot_responses"},
+		{`ALTER TABLE students ADD COLUMN dna_archetype VARCHAR(100)`, "dna_archetype"},
+		{`ALTER TABLE students ADD COLUMN dna_snapshot_completed_at TIMESTAMP WITH TIME ZONE`, "dna_snapshot_completed_at"},
+	}
+	for _, col := range columns {
+		if err := db.Exec(col.sql).Error; err != nil {
+			errStr := strings.ToLower(err.Error())
+			if !strings.Contains(errStr, "already exists") && !strings.Contains(errStr, "duplicate column") {
+				fmt.Printf("Warning: Could not ensure %s column exists: %v\n", col.name, err)
+			}
+		}
+	}
+}
+
 // ensureStudentIDColumn manually ensures the student_id column exists
 // This is a fallback if AutoMigrate fails to create it
 func ensureStudentIDColumn(db *gorm.DB) {
@@ -123,6 +145,9 @@ func ConnectToDB() (*gorm.DB, error) {
 	// Always ensure student_id column exists (defensive check)
 	// This handles cases where AutoMigrate fails silently or partially
 	ensureStudentIDColumn(db)
+
+	// Ensure DNA Snapshot columns exist (for databases created before these were added)
+	ensureStudentDNASnapshotColumns(db)
 
 	fmt.Println("Connected to DB successfully")
 
