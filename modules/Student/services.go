@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	course "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Course"
 	branch "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Branch"
+	course "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Course"
 	user "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/User"
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/datatypes"
@@ -16,15 +16,15 @@ import (
 )
 
 type CreateStudentRequest struct {
-	Email          string       `json:"email"`
-	Name           string       `json:"name"`
-	Profile        user.Profile `json:"profile,omitempty"`
-	Gender         string       `json:"gender,omitempty"`
-	District       string       `json:"district,omitempty"`
-	UniversityBranch string     `json:"universityBranch,omitempty"` // Deprecated, use BranchID
-	BranchID       *uint         `json:"branchId,omitempty"`
-	BirthYear      int          `json:"birthYear,omitempty"`
-	EnrollmentYear int          `json:"enrollmentYear,omitempty"`
+	Email            string       `json:"email"`
+	Name             string       `json:"name"`
+	Profile          user.Profile `json:"profile,omitempty"`
+	Gender           string       `json:"gender,omitempty"`
+	District         string       `json:"district,omitempty"`
+	UniversityBranch string       `json:"universityBranch,omitempty"` // Deprecated, use BranchID
+	BranchID         *uint        `json:"branchId,omitempty"`
+	BirthYear        int          `json:"birthYear,omitempty"`
+	EnrollmentYear   int          `json:"enrollmentYear,omitempty"`
 }
 
 type BulkStudentsRequest struct {
@@ -68,15 +68,15 @@ func enrollExistingUserInCourse(db *gorm.DB, courseId uint64, existingUser user.
 	}
 
 	student := Student{
-		UserID:         existingUser.ID,
-		StudentID:      &studentID,
-		CourseID:       uint(courseId),
-		BranchID:       req.BranchID,
-		Gender:         req.Gender,
-		District:       req.District,
+		UserID:           existingUser.ID,
+		StudentID:        &studentID,
+		CourseID:         uint(courseId),
+		BranchID:         req.BranchID,
+		Gender:           req.Gender,
+		District:         req.District,
 		UniversityBranch: req.UniversityBranch,
-		BirthYear:      req.BirthYear,
-		EnrollmentYear: enrollmentYear,
+		BirthYear:        req.BirthYear,
+		EnrollmentYear:   enrollmentYear,
 	}
 
 	if err := db.Create(&student).Error; err != nil {
@@ -156,15 +156,15 @@ func createStudentForCourse(db *gorm.DB, courseId uint64, req CreateStudentReque
 	}
 
 	student := Student{
-		UserID:         newUser.ID,
-		StudentID:      &studentID,
-		CourseID:       uint(courseId),
-		BranchID:       req.BranchID,
-		Gender:         req.Gender,
-		District:       req.District,
+		UserID:           newUser.ID,
+		StudentID:        &studentID,
+		CourseID:         uint(courseId),
+		BranchID:         req.BranchID,
+		Gender:           req.Gender,
+		District:         req.District,
 		UniversityBranch: req.UniversityBranch, // Keep for backward compatibility
-		BirthYear:      req.BirthYear,
-		EnrollmentYear: enrollmentYear,
+		BirthYear:        req.BirthYear,
+		EnrollmentYear:   enrollmentYear,
 	}
 
 	if err := db.Create(&student).Error; err != nil {
@@ -533,8 +533,8 @@ type DNASnapshotRequest struct {
 }
 
 type DNAArchetype struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
 	Traits      []string `json:"traits"`
 }
 
@@ -542,9 +542,9 @@ type DNAArchetype struct {
 func CalculateDNAArchetype(responses map[string]string) DNAArchetype {
 	// Scoring system for different archetypes
 	scores := map[string]int{
-		"builder":     0,
-		"explorer":    0,
-		"strategist":  0,
+		"builder":      0,
+		"explorer":     0,
+		"strategist":   0,
 		"collaborator": 0,
 	}
 
@@ -869,9 +869,9 @@ func GetDNASnapshot(c *fiber.Ctx, db *gorm.DB) error {
 
 	return c.JSON(fiber.Map{
 		"data": fiber.Map{
-			"archetype":     archetype,
-			"completedAt":   student.DNASnapshotCompletedAt,
-			"hasCompleted":  student.HasCompletedDNASnapshot,
+			"archetype":    archetype,
+			"completedAt":  student.DNASnapshotCompletedAt,
+			"hasCompleted": student.HasCompletedDNASnapshot,
 		},
 	})
 }
@@ -896,8 +896,8 @@ func GetStudentDNASnapshot(c *fiber.Ctx, db *gorm.DB) error {
 		return c.JSON(fiber.Map{
 			"data": fiber.Map{
 				"hasCompleted": false,
-				"archetype":     nil,
-				"completedAt":   nil,
+				"archetype":    nil,
+				"completedAt":  nil,
 			},
 		})
 	}
@@ -960,9 +960,9 @@ func GetStudentDNASnapshot(c *fiber.Ctx, db *gorm.DB) error {
 
 	return c.JSON(fiber.Map{
 		"data": fiber.Map{
-			"archetype":     archetype,
-			"completedAt":   student.DNASnapshotCompletedAt,
-			"hasCompleted":  student.HasCompletedDNASnapshot,
+			"archetype":    archetype,
+			"completedAt":  student.DNASnapshotCompletedAt,
+			"hasCompleted": student.HasCompletedDNASnapshot,
 		},
 	})
 }

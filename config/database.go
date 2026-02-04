@@ -28,21 +28,23 @@ import (
 	"gorm.io/gorm"
 )
 
-// ensureStudentDNASnapshotColumns adds DNA Snapshot columns to students table if missing
-// Handles databases created before these columns were added to the model
+// ensureStudentDNASnapshotColumns adds DNA Snapshot columns to students table if missing.
+// Uses IF NOT EXISTS to avoid errors when columns already exist (e.g. re-runs, existing data).
+// All new columns use DEFAULT so existing rows get safe values.
 func ensureStudentDNASnapshotColumns(db *gorm.DB) {
 	columns := []struct {
 		sql  string
 		name string
 	}{
-		{`ALTER TABLE students ADD COLUMN has_completed_dna_snapshot BOOLEAN DEFAULT false`, "has_completed_dna_snapshot"},
-		{`ALTER TABLE students ADD COLUMN dna_snapshot_responses JSONB`, "dna_snapshot_responses"},
-		{`ALTER TABLE students ADD COLUMN dna_archetype VARCHAR(100)`, "dna_archetype"},
-		{`ALTER TABLE students ADD COLUMN dna_snapshot_completed_at TIMESTAMP WITH TIME ZONE`, "dna_snapshot_completed_at"},
+		{`ALTER TABLE students ADD COLUMN IF NOT EXISTS has_completed_dna_snapshot BOOLEAN DEFAULT false`, "has_completed_dna_snapshot"},
+		{`ALTER TABLE students ADD COLUMN IF NOT EXISTS dna_snapshot_responses JSONB`, "dna_snapshot_responses"},
+		{`ALTER TABLE students ADD COLUMN IF NOT EXISTS dna_archetype VARCHAR(100)`, "dna_archetype"},
+		{`ALTER TABLE students ADD COLUMN IF NOT EXISTS dna_snapshot_completed_at TIMESTAMP WITH TIME ZONE`, "dna_snapshot_completed_at"},
 	}
 	for _, col := range columns {
 		if err := db.Exec(col.sql).Error; err != nil {
 			errStr := strings.ToLower(err.Error())
+			// Fallback: some PostgreSQL versions may not support IF NOT EXISTS on ADD COLUMN
 			if !strings.Contains(errStr, "already exists") && !strings.Contains(errStr, "duplicate column") {
 				fmt.Printf("Warning: Could not ensure %s column exists: %v\n", col.name, err)
 			}
@@ -50,21 +52,18 @@ func ensureStudentDNASnapshotColumns(db *gorm.DB) {
 	}
 }
 
-// ensureStudentIDColumn manually ensures the student_id column exists
-// This is a fallback if AutoMigrate fails to create it
+// ensureStudentIDColumn manually ensures the student_id column exists.
+// Uses IF NOT EXISTS to avoid errors when column already exists (safe for existing data).
+// This is a fallback if AutoMigrate fails to create it.
 func ensureStudentIDColumn(db *gorm.DB) {
-	// Try to add the column - if it exists, PostgreSQL will return an error which we'll ignore
-	err := db.Exec(`ALTER TABLE students ADD COLUMN student_id VARCHAR(50)`).Error
+	// ADD COLUMN IF NOT EXISTS - no DEFAULT needed; existing rows get NULL, which is valid
+	err := db.Exec(`ALTER TABLE students ADD COLUMN IF NOT EXISTS student_id VARCHAR(50)`).Error
 	if err != nil {
-		// Check if error is because column already exists
 		errStr := strings.ToLower(err.Error())
 		if !strings.Contains(errStr, "already exists") && !strings.Contains(errStr, "duplicate column") {
 			fmt.Printf("Warning: Could not ensure student_id column exists: %v\n", err)
 			return
 		}
-		// Column already exists, which is fine
-	} else {
-		fmt.Println("student_id column created successfully")
 	}
 	
 	// Try to add unique index (PostgreSQL allows multiple NULLs in unique index)
