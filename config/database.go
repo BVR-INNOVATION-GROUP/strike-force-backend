@@ -52,6 +52,58 @@ func ensureStudentDNASnapshotColumns(db *gorm.DB) {
 	}
 }
 
+// ensureImpersonationLogsTable creates impersonation_logs table if not exists
+func ensureImpersonationLogsTable(db *gorm.DB) {
+	err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS impersonation_logs (
+			id SERIAL PRIMARY KEY,
+			impersonator_id INTEGER NOT NULL,
+			target_user_id INTEGER NOT NULL,
+			target_email VARCHAR(255) NOT NULL,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		)
+	`).Error
+	if err != nil {
+		fmt.Printf("Warning: Could not ensure impersonation_logs table: %v\n", err)
+	}
+}
+
+// ensureAdminAuditLogsTable creates admin_audit_logs table if not exists
+func ensureAdminAuditLogsTable(db *gorm.DB) {
+	err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS admin_audit_logs (
+			id SERIAL PRIMARY KEY,
+			admin_id INTEGER NOT NULL,
+			action VARCHAR(100) NOT NULL,
+			target_type VARCHAR(50),
+			target_id INTEGER,
+			details TEXT,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		)
+	`).Error
+	if err != nil {
+		fmt.Printf("Warning: Could not ensure admin_audit_logs table: %v\n", err)
+	}
+}
+
+// ensureLoginPageLogosTable creates login_page_logos table if not exists
+func ensureLoginPageLogosTable(db *gorm.DB) {
+	err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS login_page_logos (
+			id SERIAL PRIMARY KEY,
+			name VARCHAR(255) NOT NULL,
+			logo_url VARCHAR(512) NOT NULL,
+			alt_text VARCHAR(255),
+			sort_order INTEGER DEFAULT 0,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+		)
+	`).Error
+	if err != nil {
+		fmt.Printf("Warning: Could not ensure login_page_logos table: %v\n", err)
+	}
+}
+
 // ensureStudentIDColumn manually ensures the student_id column exists.
 // Uses IF NOT EXISTS to avoid errors when column already exists (safe for existing data).
 // This is a fallback if AutoMigrate fails to create it.
@@ -147,6 +199,15 @@ func ConnectToDB() (*gorm.DB, error) {
 
 	// Ensure DNA Snapshot columns exist (for databases created before these were added)
 	ensureStudentDNASnapshotColumns(db)
+
+	// Ensure impersonation_logs table exists for admin audit
+	ensureImpersonationLogsTable(db)
+
+	// Ensure login_page_logos table exists for branding
+	ensureLoginPageLogosTable(db)
+
+	// Ensure admin_audit_logs table exists for audit
+	ensureAdminAuditLogsTable(db)
 
 	fmt.Println("Connected to DB successfully")
 

@@ -30,6 +30,11 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 		return UpdateCurrentUser(c, db)
 	})
 
+	// Change password (authenticated user, uses token's user_id)
+	protected.Put("/password", func(c *fiber.Ctx) error {
+		return ChangePassword(c, db)
+	})
+
 	protected.Get("/all", func(c *fiber.Ctx) error {
 		return GetAll(c, db)
 	})

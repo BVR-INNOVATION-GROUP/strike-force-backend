@@ -8,7 +8,7 @@ import (
 
 func RegisterRoutes(r fiber.Router, db *gorm.DB) {
 
-	courses := r.Group("/courses", user.JWTProtect([]string{"university-admin", "delegated-admin"}))
+	courses := r.Group("/courses", user.JWTProtect([]string{"university-admin", "delegated-admin", "super-admin"}))
 
 	courses.Post("/", func(c *fiber.Ctx) error {
 		return Create(c, db)

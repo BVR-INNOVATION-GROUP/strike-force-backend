@@ -53,6 +53,19 @@ func GenerateToken(user User) (string, error) {
 	return token.SignedString(SECRET_KEY)
 }
 
+// GenerateImpersonationToken creates a short-lived token (1 hour) for the target user.
+// impersonatorID is stored in claims for audit purposes.
+func GenerateImpersonationToken(target User, impersonatorID uint) (string, error) {
+	claims := jwt.MapClaims{
+		"user_id":         target.ID,
+		"role":            target.Role,
+		"exp":             time.Now().Add(1 * time.Hour).Unix(),
+		"impersonated_by": impersonatorID,
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(SECRET_KEY)
+}
+
 func VerifyToken(tokenString string) (jwt.MapClaims, error) {
 
 	foundToken, err := jwt.Parse(tokenString, func(t *jwt.Token) (any, error) {
@@ -226,6 +239,17 @@ func Login(c *fiber.Ctx, db *gorm.DB) error {
 
 	if !IsPasswordValid(foundUser.Password, loginReq.Password) {
 		return c.Status(401).JSON(fiber.Map{"msg": "invalid password"})
+	}
+
+	if foundUser.IsBlocked {
+		return c.Status(403).JSON(fiber.Map{"msg": "account is blocked. Please contact support."})
+	}
+
+	// Update last login timestamp
+	now := time.Now()
+	if err := db.Model(&foundUser).Update("last_login_at", now).Error; err != nil {
+		// Log but don't fail login
+		fmt.Printf("Warning: failed to update last_login_at for user %d: %v\n", foundUser.ID, err)
 	}
 
 	// Load student record if user is a student to get courseId and DNA snapshot status
@@ -1266,6 +1290,55 @@ func UpdateCurrentUser(c *fiber.Ctx, db *gorm.DB) error {
 		"msg":  "user updated successfully",
 		"data": usr,
 	})
+}
+
+// ChangePasswordRequest represents the request body for password change
+type ChangePasswordRequest struct {
+	CurrentPassword string `json:"currentPassword"`
+	NewPassword     string `json:"newPassword"`
+}
+
+// ChangePassword changes the authenticated user's password
+func ChangePassword(c *fiber.Ctx, db *gorm.DB) error {
+	userID := c.Locals("user_id").(uint)
+
+	var req ChangePasswordRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(fiber.Map{"msg": "invalid request: " + err.Error()})
+	}
+
+	if strings.TrimSpace(req.CurrentPassword) == "" {
+		return c.Status(400).JSON(fiber.Map{"msg": "current password is required"})
+	}
+	if strings.TrimSpace(req.NewPassword) == "" {
+		return c.Status(400).JSON(fiber.Map{"msg": "new password is required"})
+	}
+	if len(req.NewPassword) < 8 {
+		return c.Status(400).JSON(fiber.Map{"msg": "new password must be at least 8 characters"})
+	}
+
+	var usr User
+	if err := db.First(&usr, userID).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return c.Status(404).JSON(fiber.Map{"msg": "user not found"})
+		}
+		return c.Status(400).JSON(fiber.Map{"msg": "failed to find user"})
+	}
+
+	if !IsPasswordValid(usr.Password, req.CurrentPassword) {
+		return c.Status(400).JSON(fiber.Map{"msg": "current password is incorrect"})
+	}
+
+	hashed := GenerateHash(req.NewPassword)
+	if hashed == "" {
+		return c.Status(500).JSON(fiber.Map{"msg": "failed to hash password"})
+	}
+
+	if err := db.Model(&usr).Update("password", hashed).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"msg": "failed to update password"})
+	}
+
+	return c.JSON(fiber.Map{"msg": "password updated successfully"})
 }
 
 // UpdateUser updates a user (admin can update any user by ID)

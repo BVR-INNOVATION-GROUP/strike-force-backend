@@ -6,6 +6,8 @@ import (
 	"os"
 
 	"github.com/BVR-INNOVATION-GROUP/strike-force-backend/config"
+	"github.com/BVR-INNOVATION-GROUP/strike-force-backend/pkg/seed"
+	admin "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Admin"
 	analytics "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Analytics"
 	application "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Application"
 	auth "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Auth"
@@ -133,6 +135,11 @@ func main() {
 		log.Println("Super admin check completed")
 	}
 
+	// Seed database when SEED=true (uses SEED_PASSWORD for all seeded user passwords)
+	if err := seed.Run(DB); err != nil {
+		log.Printf("Warning: Database seeding failed: %v", err)
+	}
+
 	// Serve static files (uploads)
 	app.Static("/uploads", "./uploads")
 
@@ -140,6 +147,10 @@ func main() {
 	auth.RegisterRoutes(app, DB)
 
 	apiV1 := app.Group("/api/v1")
+	// Public route for login page logos (no auth)
+	apiV1.Get("/login-logos", func(c *fiber.Ctx) error {
+		return admin.GetPublicLoginLogos(c, DB)
+	})
 	organization.RegisterRoutes(apiV1, DB)
 	department.RegisterRRoutes(apiV1, DB)
 	branch.RegisterRoutes(apiV1, DB)
@@ -155,6 +166,7 @@ func main() {
 	invitation.RegisterRoutes(apiV1, DB)
 	delegatedaccess.RegisterRoutes(apiV1, DB)
 	analytics.RegisterRoutes(apiV1, DB)
+	admin.RegisterRoutes(apiV1, DB)
 	supervisorrequest.RegisterRoutes(apiV1, DB)
 	portfolio.RegisterRoutes(apiV1, DB)
 

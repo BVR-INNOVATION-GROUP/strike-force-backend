@@ -1,25 +1,29 @@
-# Database Seeder CLI Tool
+# Database Seeder
 
-A comprehensive CLI tool for seeding the database with realistic Ugandan data for testing purposes. This tool generates large-scale test data including organizations, users, projects, applications, and more.
+Seeds the database with realistic Ugandan data. Two ways to run:
 
-## Quick Start
+## 1. On App Startup (SEED env var)
+
+Set `SEED=true` in `.env` to seed automatically when the backend starts. All seeded user passwords use `SEED_PASSWORD`:
 
 ```bash
-# Build the seeder
+# In backend/.env
+SEED=true
+SEED_PASSWORD=SeedPass123!
+```
+
+Optional counts (defaults shown): `SEED_ORGS`, `SEED_USERS`, `SEED_PROJECTS`, `SEED_APPLICATIONS`, `SEED_GROUPS`, `SEED_MESSAGES`, `SEED_DISPUTES`, `SEED_INVITATIONS`, `SEED_NOTIFICATIONS`, `SEED_SUPERVISOR_REQUESTS`.
+
+## 2. CLI Tool
+
+```bash
+# Build and run
 cd backend
 go build -o bin/seed ./cmd/seed
+SEED_PASSWORD=MyPassword123 ./bin/seed
 
-# Run with default values (10 orgs, 100 users, 50 projects, 200 applications)
+# Or with default password (SeedPass123!)
 ./bin/seed
-
-# Run with custom values for large-scale testing
-./bin/seed [organizations] [users] [projects] [applications]
-
-# Example: Create 20 organizations, 500 users, 200 projects, 1000 applications
-./bin/seed 20 500 200 1000
-
-# Example: Create massive dataset for performance testing
-./bin/seed 50 2000 500 5000
 ```
 
 ## Features
@@ -45,7 +49,7 @@ go build -o bin/seed ./cmd/seed
   - Milestones (2-5 per project)
   - Portfolio Items (from completed milestones)
 
-- **Password**: All seeded users have password `1234567890`
+- **Password**: All seeded users use `SEED_PASSWORD` env var (default: `SeedPass123!` when running CLI)
 
 - **Relationships**: Properly links all entities maintaining referential integrity
 
@@ -100,7 +104,7 @@ go build -o bin/seed ./cmd/seed
 - **Phone Format**: `+2567XXXXXXXX` (Ugandan mobile format)
 - **Location**: All users located in "Kampala, Uganda"
 - **Skills**: 3-8 random technical skills per user
-- **Passwords**: All users: `1234567890`
+- **Passwords**: All users use `SEED_PASSWORD` env var
 
 ## Example Usage
 
