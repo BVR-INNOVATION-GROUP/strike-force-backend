@@ -6,10 +6,10 @@ services:
     environment:
       - POSTGRES_USER=admin
       - POSTGRES_PASSWORD=Admin@2025
-      - POSTGRES_DB=strikeforce_db
+      - POSTGRES_DB=strikeforce_db1
 
     ports:
-      - "5435:5432"
+      - "5438:5432"
 
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -17,7 +17,7 @@ services:
     restart: unless-stopped
 
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U admin -d strikeforce_db"]
+      test: ["CMD-SHELL", "pg_isready -U admin -d strikeforce_db1"]
       interval: 10s
       timeout: 5s
       retries: 5

@@ -917,17 +917,23 @@ func UpdateGroup(c *fiber.Ctx, db *gorm.DB) error {
 
 	// Handle memberIds update if provided
 	if req.MemberIDs != nil {
-		// Validate capacity if provided
+		// Build unique member list (leader + req.MemberIDs, deduped) first so we validate against actual count
+		allMemberIDs := make([]uint, 0)
+		allMemberIDs = append(allMemberIDs, group.UserID) // Leader is always a member
+		for _, memberID := range req.MemberIDs {
+			if memberID != group.UserID { // Avoid duplicate
+				allMemberIDs = append(allMemberIDs, memberID)
+			}
+		}
+		totalMembers := len(allMemberIDs)
+
+		// Validate capacity
+		capacity := group.Capacity
 		if req.Capacity != nil {
-			totalMembers := 1 + len(req.MemberIDs) // Leader + members
-			if totalMembers > *req.Capacity {
-				return c.Status(400).JSON(fiber.Map{"msg": fmt.Sprintf("total members (%d) exceeds capacity (%d)", totalMembers, *req.Capacity)})
-			}
-		} else {
-			totalMembers := 1 + len(req.MemberIDs) // Leader + members
-			if totalMembers > group.Capacity {
-				return c.Status(400).JSON(fiber.Map{"msg": fmt.Sprintf("total members (%d) exceeds capacity (%d)", totalMembers, group.Capacity)})
-			}
+			capacity = *req.Capacity
+		}
+		if totalMembers > capacity {
+			return c.Status(400).JSON(fiber.Map{"msg": fmt.Sprintf("total members (%d) exceeds capacity (%d)", totalMembers, capacity)})
 		}
 
 		// Validate all members exist and are students (no course restriction - allow cross-campus groups)
@@ -946,15 +952,6 @@ func UpdateGroup(c *fiber.Ctx, db *gorm.DB) error {
 
 			if member.Role != "student" {
 				return c.Status(400).JSON(fiber.Map{"msg": fmt.Sprintf("member %d must be a student", memberID)})
-			}
-		}
-
-		// Ensure leader is always in memberIds
-		allMemberIDs := make([]uint, 0)
-		allMemberIDs = append(allMemberIDs, group.UserID) // Leader is always a member
-		for _, memberID := range req.MemberIDs {
-			if memberID != group.UserID { // Avoid duplicate
-				allMemberIDs = append(allMemberIDs, memberID)
 			}
 		}
 
