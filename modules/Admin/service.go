@@ -13,6 +13,7 @@ import (
 	chat "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Chat"
 	delegatedaccess "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/DelegatedAccess"
 	department "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Department"
+	dispute "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Dispute"
 	course "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Course"
 	milestone "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Milestone"
 	supervisor "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Supervisor"
@@ -115,6 +116,88 @@ func GetAdminStudents(c *fiber.Ctx, db *gorm.DB) error {
 	return c.JSON(fiber.Map{"data": students})
 }
 
+// clearUserReferencesForDelete clears or sets null all references to the user so the user row can be deleted.
+// Uses SET NULL / unlink semantics (no cascade): remove user from user_groups, set null on invitations, delete only direct dependents.
+// Every DB call checks and returns error so the first failure is reported (avoids "transaction is aborted" masking real error).
+func clearUserReferencesForDelete(tx *gorm.DB, uid uint) error {
+	// Unlink from groups (remove membership rows; does not delete groups)
+	if err := tx.Exec("DELETE FROM user_groups WHERE user_id = ?", uid).Error; err != nil {
+		return err
+	}
+	// Delete direct dependents that reference this user
+	// Hard delete so FK is released (Message uses gorm.Model soft delete)
+	if err := tx.Unscoped().Where("sender_id = ?", uid).Delete(&chat.Message{}).Error; err != nil {
+		return err
+	}
+	if err := tx.Unscoped().Where("user_id = ?", uid).Delete(&notification.Notification{}).Error; err != nil {
+		return err
+	}
+	if err := tx.Unscoped().Where("user_id = ?", uid).Delete(&portfolio.PortfolioItem{}).Error; err != nil {
+		return err
+	}
+	if err := tx.Unscoped().Where("user_id = ?", uid).Delete(&auth.PasswordResetToken{}).Error; err != nil {
+		return err
+	}
+	if err := tx.Unscoped().Where("delegated_user_id = ? OR delegator_id = ?", uid, uid).Delete(&delegatedaccess.DelegatedAccess{}).Error; err != nil {
+		return err
+	}
+	if err := tx.Unscoped().Where("user_id = ?", uid).Delete(&student.Student{}).Error; err != nil {
+		return err
+	}
+	if err := tx.Unscoped().Where("user_id = ?", uid).Delete(&supervisor.Supervisor{}).Error; err != nil {
+		return err
+	}
+	// Hard delete so FK is released (Dispute uses gorm.Model soft delete)
+	if err := tx.Unscoped().Where("issuer_id = ? OR defendant_id = ?", uid, uid).Delete(&dispute.Dispute{}).Error; err != nil {
+		return err
+	}
+	// SET NULL where schema allows
+	if err := tx.Exec("UPDATE invitations SET user_id = NULL WHERE user_id = ?", uid).Error; err != nil {
+		return err
+	}
+	// Groups where user is leader: remove memberships then delete group
+	var groupIDs []uint
+	if err := tx.Table("groups").Where("user_id = ?", uid).Pluck("id", &groupIDs).Error; err != nil {
+		return err
+	}
+	for _, gid := range groupIDs {
+		// Hard delete so FK is released (Message uses gorm.Model soft delete)
+		if err := tx.Unscoped().Where("group_id = ?", gid).Delete(&chat.Message{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec("DELETE FROM user_groups WHERE group_id = ?", gid).Error; err != nil {
+			return err
+		}
+	}
+	if err := tx.Table("groups").Where("user_id = ?", uid).Delete(nil).Error; err != nil {
+		return err
+	}
+	// Projects owned by user: applications and milestones reference project; then unlink project
+	var projectIDs []uint
+	if err := tx.Table("projects").Where("user_id = ?", uid).Pluck("id", &projectIDs).Error; err != nil {
+		return err
+	}
+	for _, pid := range projectIDs {
+		if err := tx.Where("project_id = ?", pid).Delete(&application.Application{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("project_id = ?", pid).Delete(&milestone.Milestone{}).Error; err != nil {
+			return err
+		}
+	}
+	if err := tx.Table("projects").Where("user_id = ?", uid).Delete(nil).Error; err != nil {
+		return err
+	}
+	// Organization owned by user
+	var org organization.Organization
+	if err := tx.Where("user_id = ?", uid).First(&org).Error; err == nil {
+		if err := tx.Delete(&org).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // DeleteAdminStudent deletes a student (and associated user) - super-admin only
 func DeleteAdminStudent(c *fiber.Ctx, db *gorm.DB) error {
 	id := c.Params("id")
@@ -140,10 +223,7 @@ func DeleteAdminStudent(c *fiber.Ctx, db *gorm.DB) error {
 		if err := tx.Delete(&s).Error; err != nil {
 			return err
 		}
-		var u struct {
-			ID uint
-		}
-		if err := tx.Table("users").Where("id = ?", userID).First(&u).Error; err != nil {
+		if err := clearUserReferencesForDelete(tx, userID); err != nil {
 			return err
 		}
 		return tx.Table("users").Where("id = ?", userID).Delete(nil).Error
@@ -401,42 +481,9 @@ func DeleteAdminUser(c *fiber.Ctx, db *gorm.DB) error {
 	}
 
 	if err := db.Transaction(func(tx *gorm.DB) error {
-		// Delete in FK-safe order
-		tx.Exec("DELETE FROM user_groups WHERE user_id = ?", uid)
-		tx.Where("sender_id = ?", uid).Delete(&chat.Message{})
-		tx.Where("user_id = ?", uid).Delete(&notification.Notification{})
-		tx.Where("user_id = ?", uid).Delete(&portfolio.PortfolioItem{})
-		tx.Where("user_id = ?", uid).Delete(&auth.PasswordResetToken{})
-		tx.Where("delegated_user_id = ? OR delegator_id = ?", uid, uid).Delete(&delegatedaccess.DelegatedAccess{})
-		tx.Where("user_id = ?", uid).Delete(&student.Student{})
-		tx.Where("user_id = ?", uid).Delete(&supervisor.Supervisor{})
-		tx.Exec("UPDATE invitations SET user_id = NULL WHERE user_id = ?", uid)
-
-		// Groups where user is leader - delete memberships then group
-		var groupIDs []uint
-		tx.Table("groups").Where("user_id = ?", uid).Pluck("id", &groupIDs)
-		for _, gid := range groupIDs {
-			tx.Exec("DELETE FROM user_groups WHERE group_id = ?", gid)
+		if err := clearUserReferencesForDelete(tx, uid); err != nil {
+			return err
 		}
-		tx.Table("groups").Where("user_id = ?", uid).Delete(nil)
-
-		// Projects owned by user - applications, milestones, then projects
-		var projectIDs []uint
-		tx.Table("projects").Where("user_id = ?", uid).Pluck("id", &projectIDs)
-		for _, pid := range projectIDs {
-			tx.Where("project_id = ?", pid).Delete(&application.Application{})
-			tx.Where("project_id = ?", pid).Delete(&milestone.Milestone{})
-		}
-		tx.Table("projects").Where("user_id = ?", uid).Delete(nil)
-
-		// Organization owned by user - delete org (cascades to depts, courses, etc.)
-		var org organization.Organization
-		if err := tx.Where("user_id = ?", uid).First(&org).Error; err == nil {
-			if err := tx.Delete(&org).Error; err != nil {
-				return err
-			}
-		}
-
 		return tx.Delete(&u).Error
 	}); err != nil {
 		return c.Status(500).JSON(fiber.Map{"msg": "failed to delete user: " + err.Error()})

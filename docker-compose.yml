@@ -4,12 +4,12 @@ services:
     container_name: strikeforce8
 
     environment:
-      - POSTGRES_USER=admin
-      - POSTGRES_PASSWORD=Admin@2025
-      - POSTGRES_DB=strikeforce_db1
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=psotgres
+      - POSTGRES_DB=postgres
 
     ports:
-      - "5438:5432"
+      - "5433:5432"
 
     volumes:
       - postgres_data:/var/lib/postgresql/data
