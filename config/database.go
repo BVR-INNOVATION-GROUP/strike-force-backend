@@ -104,6 +104,28 @@ func ensureLoginPageLogosTable(db *gorm.DB) {
 	}
 }
 
+// ensureUserIsBlockedColumn adds is_blocked to users if missing (e.g. production DBs created before the field existed).
+func ensureUserIsBlockedColumn(db *gorm.DB) {
+	err := db.Exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN DEFAULT false`).Error
+	if err != nil {
+		errStr := strings.ToLower(err.Error())
+		if !strings.Contains(errStr, "already exists") && !strings.Contains(errStr, "duplicate column") {
+			fmt.Printf("Warning: Could not ensure users.is_blocked column exists: %v\n", err)
+		}
+	}
+}
+
+// ensureUserLastLoginAtColumn adds last_login_at to users if missing (used on login and admin active-users).
+func ensureUserLastLoginAtColumn(db *gorm.DB) {
+	err := db.Exec(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP WITH TIME ZONE`).Error
+	if err != nil {
+		errStr := strings.ToLower(err.Error())
+		if !strings.Contains(errStr, "already exists") && !strings.Contains(errStr, "duplicate column") {
+			fmt.Printf("Warning: Could not ensure users.last_login_at column exists: %v\n", err)
+		}
+	}
+}
+
 // ensureStudentIDColumn manually ensures the student_id column exists.
 // Uses IF NOT EXISTS to avoid errors when column already exists (safe for existing data).
 // This is a fallback if AutoMigrate fails to create it.
@@ -196,6 +218,10 @@ func ConnectToDB() (*gorm.DB, error) {
 	// Always ensure student_id column exists (defensive check)
 	// This handles cases where AutoMigrate fails silently or partially
 	ensureStudentIDColumn(db)
+
+	// Ensure users columns exist (production DBs may have been created before these were added)
+	ensureUserIsBlockedColumn(db)
+	ensureUserLastLoginAtColumn(db)
 
 	// Ensure DNA Snapshot columns exist (for databases created before these were added)
 	ensureStudentDNASnapshotColumns(db)

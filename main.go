@@ -158,6 +158,10 @@ func main() {
 	project.RegisterRoutes(apiV1, DB)
 	course.RegisterRoutes(apiV1, DB)
 	student.RegisterRoutes(apiV1, DB)
+	// University-admin / delegated-admin: delete student by user ID (student must be in their org)
+	apiV1.Delete("/students/user/:userId", user.JWTProtect([]string{"university-admin", "delegated-admin"}), func(c *fiber.Ctx) error {
+		return admin.DeleteStudentByUserID(c, DB)
+	})
 	supervisor.RegisterRoutes(apiV1, DB)
 	milestone.RegisterRoutes(apiV1, DB)
 	chat.RegisterRoutes(apiV1, DB)

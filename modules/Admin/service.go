@@ -20,7 +20,7 @@ import (
 	notification "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Notification"
 	organization "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Organization"
 	portfolio "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Portfolio"
-	project "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Project"
+	project 	"github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Project"
 	student "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Student"
 	user "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/User"
 	"github.com/gofiber/fiber/v2"
@@ -117,15 +117,10 @@ func GetAdminStudents(c *fiber.Ctx, db *gorm.DB) error {
 }
 
 // clearUserReferencesForDelete clears or sets null all references to the user so the user row can be deleted.
-// Uses SET NULL / unlink semantics (no cascade): remove user from user_groups, set null on invitations, delete only direct dependents.
-// Every DB call checks and returns error so the first failure is reported (avoids "transaction is aborted" masking real error).
 func clearUserReferencesForDelete(tx *gorm.DB, uid uint) error {
-	// Unlink from groups (remove membership rows; does not delete groups)
 	if err := tx.Exec("DELETE FROM user_groups WHERE user_id = ?", uid).Error; err != nil {
 		return err
 	}
-	// Delete direct dependents that reference this user
-	// Hard delete so FK is released (Message uses gorm.Model soft delete)
 	if err := tx.Unscoped().Where("sender_id = ?", uid).Delete(&chat.Message{}).Error; err != nil {
 		return err
 	}
@@ -147,21 +142,17 @@ func clearUserReferencesForDelete(tx *gorm.DB, uid uint) error {
 	if err := tx.Unscoped().Where("user_id = ?", uid).Delete(&supervisor.Supervisor{}).Error; err != nil {
 		return err
 	}
-	// Hard delete so FK is released (Dispute uses gorm.Model soft delete)
 	if err := tx.Unscoped().Where("issuer_id = ? OR defendant_id = ?", uid, uid).Delete(&dispute.Dispute{}).Error; err != nil {
 		return err
 	}
-	// SET NULL where schema allows
 	if err := tx.Exec("UPDATE invitations SET user_id = NULL WHERE user_id = ?", uid).Error; err != nil {
 		return err
 	}
-	// Groups where user is leader: remove memberships then delete group
 	var groupIDs []uint
 	if err := tx.Table("groups").Where("user_id = ?", uid).Pluck("id", &groupIDs).Error; err != nil {
 		return err
 	}
 	for _, gid := range groupIDs {
-		// Hard delete so FK is released (Message uses gorm.Model soft delete)
 		if err := tx.Unscoped().Where("group_id = ?", gid).Delete(&chat.Message{}).Error; err != nil {
 			return err
 		}
@@ -172,7 +163,6 @@ func clearUserReferencesForDelete(tx *gorm.DB, uid uint) error {
 	if err := tx.Table("groups").Where("user_id = ?", uid).Delete(nil).Error; err != nil {
 		return err
 	}
-	// Projects owned by user: applications and milestones reference project; then unlink project
 	var projectIDs []uint
 	if err := tx.Table("projects").Where("user_id = ?", uid).Pluck("id", &projectIDs).Error; err != nil {
 		return err
@@ -188,7 +178,6 @@ func clearUserReferencesForDelete(tx *gorm.DB, uid uint) error {
 	if err := tx.Table("projects").Where("user_id = ?", uid).Delete(nil).Error; err != nil {
 		return err
 	}
-	// Organization owned by user
 	var org organization.Organization
 	if err := tx.Where("user_id = ?", uid).First(&org).Error; err == nil {
 		if err := tx.Delete(&org).Error; err != nil {
@@ -234,6 +223,50 @@ func DeleteAdminStudent(c *fiber.Ctx, db *gorm.DB) error {
 	if adminIDRaw := c.Locals("user_id"); adminIDRaw != nil {
 		sid := uint(studentIdUint)
 		logAdminAction(db, adminIDRaw.(uint), "delete_student", "student", &sid, fmt.Sprintf("deleted student id=%d (user_id=%d)", s.ID, userID))
+	}
+	return c.JSON(fiber.Map{"msg": "student deleted successfully"})
+}
+
+// DeleteStudentByUserID deletes a student (and associated user) by user ID. For university-admin and delegated-admin only; student must belong to admin's organization.
+func DeleteStudentByUserID(c *fiber.Ctx, db *gorm.DB) error {
+	userIDParam := c.Params("userId")
+	if userIDParam == "" {
+		return c.Status(400).JSON(fiber.Map{"msg": "user id is required"})
+	}
+	uid, err := strconv.ParseUint(userIDParam, 10, 32)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"msg": "invalid user id"})
+	}
+	targetUserID := uint(uid)
+
+	adminID := c.Locals("user_id").(uint)
+	role := c.Locals("role").(string)
+	adminOrgID := organization.FindByIdForAdmin(db, adminID, role)
+	if adminOrgID == 0 {
+		return c.Status(403).JSON(fiber.Map{"msg": "you don't have permission to delete students"})
+	}
+
+	var s student.Student
+	if err := db.Joins("JOIN courses ON students.course_id = courses.id").
+		Joins("JOIN departments ON courses.department_id = departments.id").
+		Where("students.user_id = ? AND departments.organization_id = ?", targetUserID, adminOrgID).
+		First(&s).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return c.Status(404).JSON(fiber.Map{"msg": "student not found or not in your organization"})
+		}
+		return c.Status(400).JSON(fiber.Map{"msg": "failed to find student"})
+	}
+
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Delete(&s).Error; err != nil {
+			return err
+		}
+		if err := clearUserReferencesForDelete(tx, targetUserID); err != nil {
+			return err
+		}
+		return tx.Table("users").Where("id = ?", targetUserID).Delete(nil).Error
+	}); err != nil {
+		return c.Status(500).JSON(fiber.Map{"msg": "failed to delete student: " + err.Error()})
 	}
 	return c.JSON(fiber.Map{"msg": "student deleted successfully"})
 }
