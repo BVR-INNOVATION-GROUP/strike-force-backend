@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	admin "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Admin"
 	application "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Application"
 	auth "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Auth"
 	branch "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Branch"
@@ -12,6 +13,7 @@ import (
 	college "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/College"
 	course "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Course"
 	delegatedaccess "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/DelegatedAccess"
+	directmessage "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/DirectMessage"
 	department "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Department"
 	dispute "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Dispute"
 	invitation "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Invitation"
@@ -84,6 +86,27 @@ func ensureAdminAuditLogsTable(db *gorm.DB) {
 	if err != nil {
 		fmt.Printf("Warning: Could not ensure admin_audit_logs table: %v\n", err)
 	}
+}
+
+// ensureSuperAdminDelegationsTable creates super_admin_delegations if missing (older DBs).
+func ensureSuperAdminDelegationsTable(db *gorm.DB) {
+	err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS super_admin_delegations (
+			id BIGSERIAL PRIMARY KEY,
+			created_at TIMESTAMPTZ,
+			updated_at TIMESTAMPTZ,
+			deleted_at TIMESTAMPTZ,
+			delegated_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			delegator_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			is_active BOOLEAN DEFAULT true,
+			CONSTRAINT idx_super_admin_delegation_pair UNIQUE (delegator_id, delegated_user_id)
+		)
+	`).Error
+	if err != nil {
+		fmt.Printf("Warning: Could not ensure super_admin_delegations table: %v\n", err)
+		return
+	}
+	_ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_super_admin_delegations_deleted_at ON super_admin_delegations (deleted_at)`).Error
 }
 
 // ensureLoginPageLogosTable creates login_page_logos table if not exists
@@ -209,7 +232,7 @@ func ConnectToDB() (*gorm.DB, error) {
 		return nil, fmt.Errorf("failed to initialize database, got error %w", err)
 	}
 
-	migrationErr := db.AutoMigrate(&user.User{}, &organization.Organization{}, &branch.Branch{}, &college.College{}, &course.Course{}, &department.Department{}, &project.Project{}, &milestone.Milestone{}, &application.Application{}, &chat.Message{}, &dispute.Dispute{}, &invitation.Invitation{}, &notification.Notification{}, &student.Student{}, &supervisor.Supervisor{}, &supervisorrequest.SupervisorRequest{}, &portfolio.PortfolioItem{}, &auth.PasswordResetToken{}, &delegatedaccess.DelegatedAccess{})
+	migrationErr := db.AutoMigrate(&user.User{}, &organization.Organization{}, &branch.Branch{}, &college.College{}, &course.Course{}, &department.Department{}, &project.Project{}, &milestone.Milestone{}, &application.Application{}, &chat.Message{}, &dispute.Dispute{}, &invitation.Invitation{}, &notification.Notification{}, &student.Student{}, &supervisor.Supervisor{}, &supervisorrequest.SupervisorRequest{}, &portfolio.PortfolioItem{}, &auth.PasswordResetToken{}, &delegatedaccess.DelegatedAccess{}, &admin.SuperAdminDelegation{}, &directmessage.Thread{}, &directmessage.Message{})
 
 	if migrationErr != nil {
 		fmt.Printf("Migration issue: %v\n", migrationErr)
@@ -231,6 +254,9 @@ func ConnectToDB() (*gorm.DB, error) {
 
 	// Ensure login_page_logos table exists for branding
 	ensureLoginPageLogosTable(db)
+
+	// Super-admin → super-admin delegation (no org); fallback if AutoMigrate skipped
+	ensureSuperAdminDelegationsTable(db)
 
 	// Ensure admin_audit_logs table exists for audit
 	ensureAdminAuditLogsTable(db)

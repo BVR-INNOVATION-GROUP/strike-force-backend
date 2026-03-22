@@ -513,19 +513,24 @@ func DeleteAdminUser(c *fiber.Ctx, db *gorm.DB) error {
 		return c.Status(403).JSON(fiber.Map{"msg": "cannot delete super-admin"})
 	}
 
+	// Soft-remove: block, archive email (frees unique constraint), GORM soft-delete — no FK cascade.
+	archivedEmail := fmt.Sprintf("archived.%d.%d@removed.strikeforce", u.ID, time.Now().Unix())
 	if err := db.Transaction(func(tx *gorm.DB) error {
-		if err := clearUserReferencesForDelete(tx, uid); err != nil {
+		if err := tx.Model(&user.User{}).Where("id = ?", uid).Updates(map[string]interface{}{
+			"is_blocked": true,
+			"email":      archivedEmail,
+		}).Error; err != nil {
 			return err
 		}
-		return tx.Delete(&u).Error
+		return tx.Delete(&user.User{}, uid).Error
 	}); err != nil {
-		return c.Status(500).JSON(fiber.Map{"msg": "failed to delete user: " + err.Error()})
+		return c.Status(500).JSON(fiber.Map{"msg": "failed to remove user: " + err.Error()})
 	}
 
 	if adminIDRaw := c.Locals("user_id"); adminIDRaw != nil {
-		logAdminAction(db, adminIDRaw.(uint), "delete_user", "user", &uid, fmt.Sprintf("deleted user %s (id=%d)", u.Email, u.ID))
+		logAdminAction(db, adminIDRaw.(uint), "delete_user", "user", &uid, fmt.Sprintf("soft-deleted user id=%d (was %s)", u.ID, u.Email))
 	}
-	return c.JSON(fiber.Map{"msg": "user deleted successfully"})
+	return c.JSON(fiber.Map{"msg": "user removed from platform successfully"})
 }
 
 // UpdateAdminUserRole changes a user's role (super-admin only)
@@ -762,9 +767,10 @@ func CreateLoginLogo(c *fiber.Ctx, db *gorm.DB) error {
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(400).JSON(fiber.Map{"msg": "invalid request"})
 	}
-	if req.Name == "" || req.LogoURL == "" {
-		return c.Status(400).JSON(fiber.Map{"msg": "name and logoUrl are required"})
+	if req.Name == "" {
+		return c.Status(400).JSON(fiber.Map{"msg": "name is required"})
 	}
+	// Empty logoUrl is allowed: login page shows organization name only (text tile).
 	logo := LoginPageLogo{Name: req.Name, LogoURL: req.LogoURL, AltText: req.AltText, SortOrder: req.SortOrder}
 	if err := db.Create(&logo).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"msg": "failed to create logo"})

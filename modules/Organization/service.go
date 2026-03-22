@@ -266,6 +266,38 @@ func GetAll(c *fiber.Ctx, db *gorm.DB) error {
 	return c.JSON(fiber.Map{"data": transformedOrgs})
 }
 
+// GetPublicLogos returns partner and university organizations that have a logo (public, no auth).
+func GetPublicLogos(c *fiber.Ctx, db *gorm.DB) error {
+	const limit = 80
+	var orgs []Organization
+	if err := db.Model(&Organization{}).
+		Where("logo != ?", "").
+		Order("name ASC").
+		Limit(limit * 2).
+		Find(&orgs).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"msg": "failed to get organization logos"})
+	}
+	out := make([]fiber.Map, 0, len(orgs))
+	for _, o := range orgs {
+		if strings.TrimSpace(o.Logo) == "" {
+			continue
+		}
+		t := normalizeOrganizationType(o.Type)
+		if t != "PARTNER" && t != "UNIVERSITY" {
+			continue
+		}
+		out = append(out, fiber.Map{
+			"id":      o.ID,
+			"name":    o.Name,
+			"logoUrl": o.Logo,
+		})
+		if len(out) >= limit {
+			break
+		}
+	}
+	return c.JSON(fiber.Map{"data": out})
+}
+
 // GetByID retrieves an organization by ID
 func GetByID(c *fiber.Ctx, db *gorm.DB) error {
 	id := c.Params("id")

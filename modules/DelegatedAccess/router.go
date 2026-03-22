@@ -7,7 +7,7 @@ import (
 )
 
 func RegisterRoutes(router fiber.Router, db *gorm.DB) {
-	delegated := router.Group("/delegated-access", user.JWTProtect([]string{"university-admin", "delegated-admin"}))
+	delegated := router.Group("/delegated-access", user.JWTProtect([]string{"university-admin", "partner", "super-admin"}))
 
 	delegated.Post("/", func(c *fiber.Ctx) error {
 		return Create(c, db)

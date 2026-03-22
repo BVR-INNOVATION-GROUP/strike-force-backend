@@ -89,4 +89,14 @@ func RegisterRoutes(r fiber.Router, db *gorm.DB) {
 	admin.Get("/storage-usage", func(c *fiber.Ctx) error {
 		return GetStorageUsage(c, db)
 	})
+
+	admin.Get("/super-admin-delegations", func(c *fiber.Ctx) error {
+		return ListSuperAdminDelegations(c, db)
+	})
+	admin.Post("/super-admin-delegations", func(c *fiber.Ctx) error {
+		return CreateSuperAdminDelegation(c, db)
+	})
+	admin.Delete("/super-admin-delegations/:id", func(c *fiber.Ctx) error {
+		return DeleteSuperAdminDelegation(c, db)
+	})
 }

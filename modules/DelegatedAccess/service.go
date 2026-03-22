@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"strconv"
 	"strings"
 
 	organization "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Organization"
@@ -11,6 +12,39 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
 )
+
+func normalizeOrgType(t string) string {
+	switch strings.ToUpper(strings.TrimSpace(t)) {
+	case "COMPANY":
+		return "PARTNER"
+	default:
+		return strings.ToUpper(strings.TrimSpace(t))
+	}
+}
+
+func orgForUniversityAdmin(db *gorm.DB, adminUserID uint) (organization.Organization, error) {
+	var org organization.Organization
+	err := db.Where("user_id = ?", adminUserID).First(&org).Error
+	if err != nil {
+		return org, err
+	}
+	if normalizeOrgType(org.Type) != "UNIVERSITY" {
+		return org, gorm.ErrRecordNotFound
+	}
+	return org, nil
+}
+
+func orgForPartner(db *gorm.DB, partnerUserID uint) (organization.Organization, error) {
+	var org organization.Organization
+	err := db.Where("user_id = ?", partnerUserID).First(&org).Error
+	if err != nil {
+		return org, err
+	}
+	if normalizeOrgType(org.Type) != "PARTNER" {
+		return org, gorm.ErrRecordNotFound
+	}
+	return org, nil
+}
 
 // GenerateRandomPassword generates a secure random password
 func GenerateRandomPassword(length int) (string, error) {
@@ -35,8 +69,9 @@ func GenerateRandomPassword(length int) (string, error) {
 
 // CreateDelegatedAccessRequest represents the request to create a delegated user
 type CreateDelegatedAccessRequest struct {
-	Email string `json:"email"`
-	Name  string `json:"name"`
+	Email            string `json:"email"`
+	Name             string `json:"name"`
+	OrganizationID   *uint  `json:"organizationId,omitempty"` // Required for super-admin
 }
 
 // Create creates a delegated user and sends credentials via email
@@ -44,9 +79,8 @@ func Create(c *fiber.Ctx, db *gorm.DB) error {
 	userID := c.Locals("user_id").(uint)
 	role, _ := c.Locals("role").(string)
 
-	// Only university-admin can delegate access
-	if role != "university-admin" {
-		return c.Status(403).JSON(fiber.Map{"msg": "only university admins can delegate access"})
+	if role != "university-admin" && role != "partner" && role != "super-admin" {
+		return c.Status(403).JSON(fiber.Map{"msg": "you don't have permission to delegate access"})
 	}
 
 	var req CreateDelegatedAccessRequest
@@ -66,16 +100,45 @@ func Create(c *fiber.Ctx, db *gorm.DB) error {
 		return c.Status(400).JSON(fiber.Map{"msg": "name is required"})
 	}
 
-	// Get the delegator (university admin)
 	var delegator user.User
 	if err := db.First(&delegator, userID).Error; err != nil {
 		return c.Status(404).JSON(fiber.Map{"msg": "delegator not found"})
 	}
 
-	// Get the organization for this university admin
 	var org organization.Organization
-	if err := db.Where("user_id = ?", userID).First(&org).Error; err != nil {
-		return c.Status(404).JSON(fiber.Map{"msg": "organization not found for this admin"})
+	switch role {
+	case "university-admin":
+		o, err := orgForUniversityAdmin(db, userID)
+		if err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return c.Status(404).JSON(fiber.Map{"msg": "organization not found for this admin"})
+			}
+			return c.Status(400).JSON(fiber.Map{"msg": "failed to resolve organization"})
+		}
+		org = o
+	case "partner":
+		o, err := orgForPartner(db, userID)
+		if err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return c.Status(404).JSON(fiber.Map{"msg": "partner organization not found"})
+			}
+			return c.Status(400).JSON(fiber.Map{"msg": "failed to resolve organization"})
+		}
+		org = o
+	case "super-admin":
+		if req.OrganizationID == nil || *req.OrganizationID == 0 {
+			return c.Status(400).JSON(fiber.Map{"msg": "organizationId is required"})
+		}
+		if err := db.First(&org, *req.OrganizationID).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return c.Status(404).JSON(fiber.Map{"msg": "organization not found"})
+			}
+			return c.Status(400).JSON(fiber.Map{"msg": "failed to load organization"})
+		}
+		nt := normalizeOrgType(org.Type)
+		if nt != "PARTNER" && nt != "UNIVERSITY" {
+			return c.Status(400).JSON(fiber.Map{"msg": "organization must be a partner or university"})
+		}
 	}
 
 	// Check if user with this email already exists
@@ -159,29 +222,51 @@ func Create(c *fiber.Ctx, db *gorm.DB) error {
 	})
 }
 
-// GetAll returns all delegated users for the current university admin
+// GetAll returns delegated users for the current admin (scoped by organization).
 func GetAll(c *fiber.Ctx, db *gorm.DB) error {
 	userID := c.Locals("user_id").(uint)
 	role, _ := c.Locals("role").(string)
 
-	// Only university-admin can view delegated users
-	if role != "university-admin" {
-		return c.Status(403).JSON(fiber.Map{"msg": "only university admins can view delegated access"})
+	if role != "university-admin" && role != "partner" && role != "super-admin" {
+		return c.Status(403).JSON(fiber.Map{"msg": "you don't have permission to view delegated access"})
 	}
 
-	// Get the organization for this university admin
-	var org organization.Organization
-	if err := db.Where("user_id = ?", userID).First(&org).Error; err != nil {
-		return c.Status(404).JSON(fiber.Map{"msg": "organization not found for this admin"})
-	}
-
-	// Get all delegations for this organization
 	var delegations []DelegatedAccess
-	if err := db.Where("organization_id = ? AND delegator_id = ?", org.ID, userID).
-		Preload("DelegatedUser").
-		Preload("Organization").
-		Preload("Delegator").
-		Find(&delegations).Error; err != nil {
+	q := db.Model(&DelegatedAccess{})
+
+	switch role {
+	case "university-admin":
+		org, err := orgForUniversityAdmin(db, userID)
+		if err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return c.Status(404).JSON(fiber.Map{"msg": "organization not found for this admin"})
+			}
+			return c.Status(400).JSON(fiber.Map{"msg": "failed to resolve organization"})
+		}
+		q = q.Where("organization_id = ? AND delegator_id = ?", org.ID, userID)
+	case "partner":
+		org, err := orgForPartner(db, userID)
+		if err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return c.Status(404).JSON(fiber.Map{"msg": "partner organization not found"})
+			}
+			return c.Status(400).JSON(fiber.Map{"msg": "failed to resolve organization"})
+		}
+		q = q.Where("organization_id = ? AND delegator_id = ?", org.ID, userID)
+	case "super-admin":
+		orgIDStr := c.Query("organizationId")
+		if orgIDStr == "" {
+			return c.Status(400).JSON(fiber.Map{"msg": "organizationId query parameter is required"})
+		}
+		oid, err := strconv.ParseUint(orgIDStr, 10, 32)
+		if err != nil || oid == 0 {
+			return c.Status(400).JSON(fiber.Map{"msg": "invalid organizationId"})
+		}
+		// Only delegations created by this super-admin (same as partner / university-admin)
+		q = q.Where("organization_id = ? AND delegator_id = ?", uint(oid), userID)
+	}
+
+	if err := q.Preload("DelegatedUser").Preload("Organization").Preload("Delegator").Find(&delegations).Error; err != nil {
 		return c.Status(400).JSON(fiber.Map{"msg": "failed to fetch delegations: " + err.Error()})
 	}
 
@@ -191,15 +276,14 @@ func GetAll(c *fiber.Ctx, db *gorm.DB) error {
 	})
 }
 
-// Delete withdraws delegated access by setting IsActive to false or deleting the record
+// Delete withdraws delegated access by deleting the record
 func Delete(c *fiber.Ctx, db *gorm.DB) error {
 	id := c.Params("id")
 	userID := c.Locals("user_id").(uint)
 	role, _ := c.Locals("role").(string)
 
-	// Only university-admin can withdraw access
-	if role != "university-admin" {
-		return c.Status(403).JSON(fiber.Map{"msg": "only university admins can withdraw delegated access"})
+	if role != "university-admin" && role != "partner" && role != "super-admin" {
+		return c.Status(403).JSON(fiber.Map{"msg": "you don't have permission to withdraw delegated access"})
 	}
 
 	var delegation DelegatedAccess
@@ -207,19 +291,13 @@ func Delete(c *fiber.Ctx, db *gorm.DB) error {
 		return c.Status(404).JSON(fiber.Map{"msg": "delegation not found"})
 	}
 
-	// Verify the delegator owns this delegation
 	if delegation.DelegatorID != userID {
-		return c.Status(403).JSON(fiber.Map{"msg": "you don't have permission to withdraw this access"})
+		return c.Status(403).JSON(fiber.Map{"msg": "you can only withdraw access that you granted"})
 	}
 
-	// Delete the delegation record
 	if err := db.Delete(&delegation).Error; err != nil {
 		return c.Status(400).JSON(fiber.Map{"msg": "failed to withdraw access: " + err.Error()})
 	}
-
-	// Optionally delete the user if they have no other roles/connections
-	// For now, we'll just delete the delegation and leave the user
-	// In production, you might want to check if user has other roles before deleting
 
 	return c.JSON(fiber.Map{"msg": "delegated access withdrawn successfully"})
 }

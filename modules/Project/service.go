@@ -682,9 +682,9 @@ func Delete(c *fiber.Ctx, db *gorm.DB) error {
 		return c.Status(400).JSON(fiber.Map{"msg": "failed to find project"})
 	}
 
-	// Check if user owns the project
 	userID := c.Locals("user_id").(uint)
-	if proj.UserID != userID {
+	role, _ := c.Locals("role").(string)
+	if role != "super-admin" && proj.UserID != userID {
 		return c.Status(403).JSON(fiber.Map{"msg": "you don't have permission to delete this project"})
 	}
 

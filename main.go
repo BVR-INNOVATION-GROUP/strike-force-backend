@@ -16,6 +16,7 @@ import (
 	college "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/College"
 	course "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Course"
 	delegatedaccess "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/DelegatedAccess"
+	directmessage "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/DirectMessage"
 	department "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Department"
 	invitation "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Invitation"
 	milestone "github.com/BVR-INNOVATION-GROUP/strike-force-backend/modules/Milestone"
@@ -151,6 +152,9 @@ func main() {
 	apiV1.Get("/login-logos", func(c *fiber.Ctx) error {
 		return admin.GetPublicLoginLogos(c, DB)
 	})
+	apiV1.Get("/organizations/public-logos", func(c *fiber.Ctx) error {
+		return organization.GetPublicLogos(c, DB)
+	})
 	organization.RegisterRoutes(apiV1, DB)
 	department.RegisterRRoutes(apiV1, DB)
 	branch.RegisterRoutes(apiV1, DB)
@@ -169,6 +173,7 @@ func main() {
 	application.RegisterRoutes(apiV1, DB)
 	invitation.RegisterRoutes(apiV1, DB)
 	delegatedaccess.RegisterRoutes(apiV1, DB)
+	directmessage.RegisterRoutes(apiV1, DB)
 	analytics.RegisterRoutes(apiV1, DB)
 	admin.RegisterRoutes(apiV1, DB)
 	supervisorrequest.RegisterRoutes(apiV1, DB)
